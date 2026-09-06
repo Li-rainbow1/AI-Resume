@@ -1,0 +1,27 @@
+# author: jf
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.env
+.env.test
+*.egg-info/
+build/
+dist/
+reports/*
+!reports/README.md
+allure-results/
+allure-report/
+*.jtl
+*.log
+playwright-report/
+test-results/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
