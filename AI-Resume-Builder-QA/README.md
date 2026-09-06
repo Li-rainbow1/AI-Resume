@@ -5,7 +5,7 @@
 
 ## 当前阶段
 
-第一阶段 pytest + httpx 基础设施与本地隔离 QA 环境已建立，包含管理员加密登录 Fixture、动态测试数据、安全清理器、OpenAI-compatible Mock AI，以及 Markdown/PDF/DOCX 的 RAG 主链自动化。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
+pytest + httpx 基础设施、本地隔离 QA 环境及单条 Playwright UI 主链已建立，包含管理员加密登录 Fixture、动态测试数据、安全清理器、OpenAI-compatible Mock AI、Markdown/PDF/DOCX RAG 接口主链，以及 Markdown 图片附件上传与预览回归。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
 
 ## 当前文档
 
@@ -29,6 +29,8 @@ clients/              鉴权、SSE 与 RAG 接口客户端
 fixtures/             配置、管理员 Token、数据工厂与清理器
 tests/api/            RAG 主链接口自动化
 tests/mock/           Mock AI 契约测试
+tests/ui/             Markdown 图片预览 Playwright 场景
+pages/                登录、知识库与 Markdown 预览 Page Object
 testdata/             测试数据生成规则
 mock_server/          OpenAI-compatible Mock AI
 reports/              JUnit、临时数据与运行产物
@@ -72,6 +74,18 @@ $env:QA_ADMIN_PASSWORD = '<仅在本机当前进程填写>'
 
 隔离 Compose 内的业务后端和图片 Worker 使用 `http://mock-ai:8000`。Mock 只接受占位 Key，不保存请求 Authorization；隔离数据库不存在会覆盖环境变量的既有管理员配置。
 
+Playwright 场景使用 Chromium，只在显式开启 `QA_RUN_UI` 时执行。失败时在 `reports/playwright/` 保留截图，并生成独立 HTML 报告：
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install chromium
+docker compose --env-file .env.test -f compose.qa.yml up -d --build frontend
+$env:QA_RUN_UI = '1'
+.\.venv\Scripts\python.exe -m pytest tests\ui\test_markdown_image_preview.py -m ui --browser chromium --screenshot only-on-failure --output reports\playwright\artifacts --html=reports\playwright\report.html --self-contained-html
+.\.venv\Scripts\python.exe scripts\verify_run_cleanup.py
+```
+
+UI 用例上传前登记带 `QA_RUN_ID` 的完整文件名。正常删除、断言失败或 pytest 中断退出时，清理 Fixture 都会再次分页查询并仅删除完全匹配的本轮文档。本地生成的 Markdown 和图片只位于 pytest 临时目录，不会删除源文件。
+
 ## 真实性边界
 
 - 已完成：步骤一的 Git、运行时版本、Docker Compose 配置、容器状态和 HTTP 健康检查。
@@ -82,5 +96,6 @@ $env:QA_ADMIN_PASSWORD = '<仅在本机当前进程填写>'
 - 已记录：`413`、Embedding 批量上限、RAG TopK、实时语音多进程问题均有缺陷文档；真实浏览器/多 worker 回归以各缺陷文档的未执行项为准。
 - 已完成：第一阶段 pytest/httpx、管理员鉴权 Fixture、运行 ID 隔离数据、自动清理、Mock AI 与 RAG 主链用例。
 - 已执行：本地隔离环境全套 `16 passed`；Markdown/PDF/DOCX 三格式 RAG 主链 `3 passed`，当前运行 ID 残留文档数为 0。
-- 本轮未做：Playwright、Locust、DeepEval、本地一键回归和远端推送。
+- 已执行：Chromium 下 Markdown 图片附件上传、图片增强、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
+- 本轮未做：Locust、DeepEval、本地一键回归和远端推送。
 - 未完成内容不得提前写成简历成果。

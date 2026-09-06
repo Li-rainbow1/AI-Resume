@@ -22,6 +22,7 @@ class RagTestDocument:
     vision_marker: str
     assets: list[UploadAsset]
     expected_file_name: str
+    attachment_directory: Path | None = None
 
 
 class RagDataFactory:
@@ -34,17 +35,19 @@ class RagDataFactory:
         run_id = uuid4().hex
         marker = f"QA_RAG_{kind.upper()}_{run_id}"
         vision_marker = "QA_VISION_MARKER"
-        image_path = self._create_image(run_id)
         if kind == "md":
+            image_path = self._create_image(run_id, self._root / "assets")
             return self._create_markdown(marker, vision_marker, image_path)
+        image_path = self._create_image(run_id, self._root)
         if kind == "pdf":
             return self._create_pdf(marker, vision_marker, image_path)
         if kind == "docx":
             return self._create_docx(marker, vision_marker, image_path)
         raise ValueError(f"不支持的测试文档类型：{kind}")
 
-    def _create_image(self, run_id: str) -> Path:
-        path = self._root / f"qa-image-{run_id}.png"
+    def _create_image(self, run_id: str, directory: Path) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"qa-image-{run_id}.png"
         image = Image.new("RGB", (720, 240), "white")
         draw = ImageDraw.Draw(image)
         draw.rectangle((12, 12, 708, 228), outline="black", width=3)
@@ -69,6 +72,7 @@ class RagDataFactory:
                 UploadAsset(image_path, "image/png", f"assets/{image_path.name}", role="attachment"),
             ],
             expected_file_name=path.name,
+            attachment_directory=image_path.parent,
         )
 
     def _create_pdf(self, marker: str, vision_marker: str, image_path: Path) -> RagTestDocument:

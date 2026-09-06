@@ -6,6 +6,7 @@ pytest_plugins = (
     "fixtures.auth",
     "fixtures.data_factory",
     "fixtures.lifecycle",
+    "fixtures.ui",
 )
 
 

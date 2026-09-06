@@ -25,11 +25,13 @@ test = [
   "allure-pytest>=2.14,<3.0",
   "pytest>=8.3,<10.0",
   "pytest-asyncio>=0.25,<2.0",
+  "pytest-html>=4.1,<5.0",
+  "pytest-playwright>=0.7,<1.0",
   "pytest-timeout>=2.3,<3.0",
 ]
 
 [tool.setuptools]
-packages = ["clients", "fixtures", "mock_server"]
+packages = ["clients", "fixtures", "mock_server", "pages"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"
@@ -47,4 +49,5 @@ markers = [
   "integration: 需要运行中的业务服务、管理员凭据和写入授权",
   "live_contract: 只读访问运行中的业务服务，不创建业务数据",
   "mock_ai: FastAPI Mock AI 的契约测试",
+  "ui: 需要隔离前端与浏览器的 Playwright UI 测试",
 ]
