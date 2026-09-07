@@ -69,6 +69,12 @@ def main() -> None:
         "PERF_TASK_WAIT_MIN_SECONDS": "1",
         "PERF_TASK_WAIT_MAX_SECONDS": "2",
         "QA_RAG_IMAGE_ENRICHMENT_CONCURRENCY": "3",
+        "QA_RUN_RAG_QUALITY": "0",
+        "QA_ALLOW_QUALITY_WRITES": "0",
+        "QA_QUALITY_REAL_MODELS_CONFIRMED": "0",
+        "QA_ALLOW_REMOTE_QUALITY": "0",
+        "QA_QUALITY_REPEAT_COUNT": "2",
+        "QA_RUN_DEEPEVAL": "0",
     }
     content = "# author: jf\n# 本文件仅用于本机隔离 QA 环境，禁止提交。\n"
     content += "\n".join(f"{key}={value}" for key, value in values.items()) + "\n"

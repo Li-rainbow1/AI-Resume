@@ -5,7 +5,7 @@
 
 ## 当前阶段
 
-pytest + httpx、本地隔离 QA 环境、单条 Playwright UI 主链及五项 Locust 性能脚本已建立。Locust 已完成单用户短时冒烟，正式性能基线尚未执行。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
+pytest + httpx、本地隔离 QA 环境、单条 Playwright UI 主链、五项 Locust 性能脚本及第一版 AI/RAG 质量评测脚本已建立。Locust 已完成单用户短时冒烟；真实模型质量基线和正式性能基线尚未执行。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
 
 ## 当前文档
 
@@ -35,6 +35,8 @@ testdata/             测试数据生成规则
 mock_server/          OpenAI-compatible Mock AI
 reports/              JUnit、临时数据与运行产物
 performance/          五项 Locust 场景、公共组件、脱敏问题与 Worker 对比入口
+quality/              Golden Dataset 加载、确定性指标、DeepEval、Bad Case 与报告
+tests/quality/        指标单元验证和真实 RAG 质量基线入口
 ```
 
 ## 执行方式
@@ -89,6 +91,8 @@ UI 用例上传前登记带 `QA_RUN_ID` 的完整文件名。正常删除、断�
 
 Locust 的五个独立场景、门禁、报告和 Worker 1/3 切换方式见 [`performance/README.md`](performance/README.md)。运行产物位于 `reports/locust/` 且不会进入 Git。
 
+AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置和报告结构见 [`quality/README.md`](quality/README.md)。当前隔离 Compose 使用 Mock AI，真实质量用例会在上传前安全跳过，不会生成虚假的质量基线。
+
 ## 真实性边界
 
 - 已完成：步骤一的 Git、运行时版本、Docker Compose 配置、容器状态和 HTTP 健康检查。
@@ -101,5 +105,7 @@ Locust 的五个独立场景、门禁、报告和 Worker 1/3 切换方式见 [`p
 - 已执行：本地隔离环境全套 `16 passed`；Markdown/PDF/DOCX 三格式 RAG 主链 `3 passed`，当前运行 ID 残留文档数为 0。
 - 已执行：Chromium 下 Markdown 图片附件上传、图片增强、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
 - 已执行：五项 Locust 脚本的小流量冒烟；正式性能基线、容量结论和优化结论均未执行。
-- 本轮未做：DeepEval、本地一键回归和远端推送。
+- 已实现：15 条 Golden Dataset、七项确定性指标、DeepEval 四项指标、Bad Case 分类和质量报告；指标单元验证已执行。
+- 未执行：真实 Chat、Embedding、Vision/OCR 与固定 Judge 的小规模质量基线；当前 Mock AI 隔离环境不满足真实性门禁。
+- 本轮未做：正式 AI/RAG 质量门禁、本地一键回归和远端推送。
 - 未完成内容不得提前写成简历成果。

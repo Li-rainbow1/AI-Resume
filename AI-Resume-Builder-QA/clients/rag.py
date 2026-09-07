@@ -23,6 +23,14 @@ class RagClient:
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
 
+    async def list_system_services(self) -> list[dict[str, Any]]:
+        response = await self._client.get("/api/admin/system-services")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise AssertionError("系统服务配置接口未返回列表")
+        return [item for item in payload if isinstance(item, dict)]
+
     async def upload_stream(self, assets: list[UploadAsset]) -> list[dict[str, Any]]:
         files = [("files", (item.path.name, item.path.read_bytes(), item.content_type)) for item in assets]
         endpoint = "/api/ai/rag/upload/stream"
