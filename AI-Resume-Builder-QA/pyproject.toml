@@ -6,13 +6,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-resume-builder-qa"
 version = "0.1.0"
-description = "AI Resume Builder 独立接口自动化与 Mock AI 工程"
+description = "AI Resume Builder 独立接口、UI、性能自动化与 Mock AI 工程"
 requires-python = ">=3.11"
 dependencies = [
   "cryptography>=45.0,<47.0",
   "fastapi>=0.115,<1.0",
   "httpx>=0.28,<1.0",
+  "locust>=2.41,<3.0",
   "pillow>=11.0,<13.0",
+  "pymysql>=1.1,<2.0",
   "python-docx>=1.1,<2.0",
   "python-dotenv>=1.1,<2.0",
   "python-multipart>=0.0.20,<1.0",
@@ -31,7 +33,7 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["clients", "fixtures", "mock_server", "pages"]
+packages = ["clients", "fixtures", "mock_server", "pages", "performance", "performance.locustfiles", "performance.locustfiles.common"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"

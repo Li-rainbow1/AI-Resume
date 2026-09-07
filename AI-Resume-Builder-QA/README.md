@@ -5,7 +5,7 @@
 
 ## 当前阶段
 
-pytest + httpx 基础设施、本地隔离 QA 环境及单条 Playwright UI 主链已建立，包含管理员加密登录 Fixture、动态测试数据、安全清理器、OpenAI-compatible Mock AI、Markdown/PDF/DOCX RAG 接口主链，以及 Markdown 图片附件上传与预览回归。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
+pytest + httpx、本地隔离 QA 环境、单条 Playwright UI 主链及五项 Locust 性能脚本已建立。Locust 已完成单用户短时冒烟，正式性能基线尚未执行。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
 
 ## 当前文档
 
@@ -34,6 +34,7 @@ pages/                登录、知识库与 Markdown 预览 Page Object
 testdata/             测试数据生成规则
 mock_server/          OpenAI-compatible Mock AI
 reports/              JUnit、临时数据与运行产物
+performance/          五项 Locust 场景、公共组件、脱敏问题与 Worker 对比入口
 ```
 
 ## 执行方式
@@ -86,6 +87,8 @@ $env:QA_RUN_UI = '1'
 
 UI 用例上传前登记带 `QA_RUN_ID` 的完整文件名。正常删除、断言失败或 pytest 中断退出时，清理 Fixture 都会再次分页查询并仅删除完全匹配的本轮文档。本地生成的 Markdown 和图片只位于 pytest 临时目录，不会删除源文件。
 
+Locust 的五个独立场景、门禁、报告和 Worker 1/3 切换方式见 [`performance/README.md`](performance/README.md)。运行产物位于 `reports/locust/` 且不会进入 Git。
+
 ## 真实性边界
 
 - 已完成：步骤一的 Git、运行时版本、Docker Compose 配置、容器状态和 HTTP 健康检查。
@@ -97,5 +100,6 @@ UI 用例上传前登记带 `QA_RUN_ID` 的完整文件名。正常删除、断�
 - 已完成：第一阶段 pytest/httpx、管理员鉴权 Fixture、运行 ID 隔离数据、自动清理、Mock AI 与 RAG 主链用例。
 - 已执行：本地隔离环境全套 `16 passed`；Markdown/PDF/DOCX 三格式 RAG 主链 `3 passed`，当前运行 ID 残留文档数为 0。
 - 已执行：Chromium 下 Markdown 图片附件上传、图片增强、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
-- 本轮未做：Locust、DeepEval、本地一键回归和远端推送。
+- 已执行：五项 Locust 脚本的小流量冒烟；正式性能基线、容量结论和优化结论均未执行。
+- 本轮未做：DeepEval、本地一键回归和远端推送。
 - 未完成内容不得提前写成简历成果。

@@ -78,6 +78,8 @@ async def chat_completions(
     await _apply_scenario(scenario)
     payload = await request.json()
     is_vision = _contains_image(payload.get("messages"))
+    serialized_messages = json.dumps(payload.get("messages"), ensure_ascii=False)
+    is_interview = '"assistantReply"' in serialized_messages and '"turnScore"' in serialized_messages
     content = (
         json.dumps(
             {
@@ -89,6 +91,18 @@ async def chat_completions(
             ensure_ascii=False,
         )
         if is_vision
+        else json.dumps(
+            {
+                "assistantReply": "QA Mock 面试回复",
+                "phase": "skills",
+                "nextAction": "continue",
+                "turnScore": {"score": 80, "comment": "QA Mock 评分"},
+                "finalEvaluation": None,
+                "memorySummary": "QA Mock 会话摘要",
+            },
+            ensure_ascii=False,
+        )
+        if is_interview
         else "QA_MOCK_CHAT_ANSWER"
     )
     completion_id = f"chatcmpl-{uuid4().hex}"

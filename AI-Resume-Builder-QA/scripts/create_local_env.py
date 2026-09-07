@@ -57,6 +57,18 @@ def main() -> None:
         "MOCK_EMBEDDING_DIMENSIONS": "1024",
         "QA_IMAGE_POLL_TIMEOUT_SECONDS": "180",
         "QA_IMAGE_POLL_INTERVAL_SECONDS": "1",
+        "PERF_ALLOW_RESUME_WRITES": "0",
+        "PERF_ALLOW_RAG_WRITES": "0",
+        "PERF_ALLOW_INTERVIEW_WRITES": "0",
+        "PERF_RUN_AUTOSAVE": "0",
+        "PERF_RUN_RAG_QUERY": "0",
+        "PERF_RUN_FILE_UPLOAD": "0",
+        "PERF_RUN_IMAGE_WORKER": "0",
+        "PERF_RUN_INTERVIEW": "0",
+        "PERF_AUTOSAVE_INTERVAL_SECONDS": "2",
+        "PERF_TASK_WAIT_MIN_SECONDS": "1",
+        "PERF_TASK_WAIT_MAX_SECONDS": "2",
+        "QA_RAG_IMAGE_ENRICHMENT_CONCURRENCY": "3",
     }
     content = "# author: jf\n# 本文件仅用于本机隔离 QA 环境，禁止提交。\n"
     content += "\n".join(f"{key}={value}" for key, value in values.items()) + "\n"
