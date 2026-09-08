@@ -1,6 +1,10 @@
 # author: jf
 [CmdletBinding()]
-param([switch]$WithPerformance, [switch]$WithQuality)
+param(
+    [ValidateSet('autosave', 'rag_query', 'file_upload', 'image_worker_comparison', 'interview_sse')]
+    [string[]]$Performance,
+    [switch]$Quality
+)
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -19,8 +23,8 @@ try {
         throw '缺少 QA .venv，请先安装 README 中的 test 依赖；清理校验无法启动。'
     }
     $arguments = @((Join-Path $PSScriptRoot 'regression_runner.py'), '--report', $report)
-    if ($WithPerformance) { $arguments += '--with-performance' }
-    if ($WithQuality) { $arguments += '--with-quality' }
+    if ($Performance) { $arguments += @('--performance', ($Performance -join ',')) }
+    if ($Quality) { $arguments += '--quality' }
     & $python @arguments
     $code = $LASTEXITCODE
 } catch {

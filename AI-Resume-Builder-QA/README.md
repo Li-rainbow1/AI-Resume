@@ -115,20 +115,20 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 
 ```powershell
 .\scripts\run_regression.ps1
-.\scripts\run_regression.ps1 -WithPerformance
-.\scripts\run_regression.ps1 -WithQuality
+.\scripts\run_regression.ps1 -Performance autosave,rag_query
+.\scripts\run_regression.ps1 -Quality
 ```
 
 前置条件：QA `.venv` 已安装 `.[test]`、Playwright Chromium 已安装，`.env.test` 中隔离账号有效，既有 Compose 服务已启动且健康。入口不安装依赖、不启动或重建容器。默认检查运行中服务、localhost 绑定端口、后端和 Worker 模型地址、管理员生效配置及 Chromium 启动能力。
 
 默认依次执行健康检查、`tests/api`、`tests/mock`、`tests/clients`、Markdown 图片预览 UI 回归和现有清理校验。UI 强制启用；pytest 零用例、任一 skip、失败或报告缺失均返回非零。默认覆盖进程中继承的性能和质量开关为关闭；接口及 UI 的合成文档写入只在核验 Mock AI 的隔离 QA 环境执行。不会调用真实 Chat、Embedding、Vision/OCR 或 Judge。
 
-`-WithPerformance` 只运行已开启 `PERF_RUN_*` 的场景，各场景仍自行检查既有 `PERF_ALLOW_*` 写入门禁；没有选择场景时失败。沿用 `LOCUST_USERS`、`LOCUST_SPAWN_RATE`、`LOCUST_RUN_TIME`，缺省 1 用户、每秒 1 用户、15 秒。图片场景使用当前 Worker 并发配置，不切换 1/3 或重建容器；独立对比入口仍见性能说明。
+`-Performance autosave,rag_query` 在默认 Mock 回归后追加指定场景。可选值为 `autosave`、`rag_query`、`file_upload`、`image_worker_comparison`、`interview_sse`，入口仅启用对应 `PERF_RUN_*`，忽略环境中其他场景开关，不修改对应 `PERF_ALLOW_*` 写入授权。沿用 `LOCUST_USERS`、`LOCUST_SPAWN_RATE`、`LOCUST_RUN_TIME`，缺省 1 用户、每秒 1 用户、15 秒。图片场景使用当前 Worker 并发配置，不切换 1/3 或重建容器；独立对比入口仍见性能说明。
 
-`-WithQuality` 要求提前提供真实模型、`QA_RUN_RAG_QUALITY`、`QA_ALLOW_QUALITY_WRITES`、`QA_QUALITY_REAL_MODELS_CONFIRMED`、`QA_RUN_DEEPEVAL` 和三个 Judge 环境变量，并安装 `.[test,eval]`。此模式允许接口和 UI 阶段使用已授权的真实模型；质量入口仍检查既有真实模型门禁。入口不替用户切换模型；当前 Mock 配置会使质量阶段 skip，汇总按失败处理。两个可选参数不能同时使用。
+`-Quality` 只执行真实模型健康门禁、质量评测及清理校验，不运行 API/UI，也不检查前端或启动 Chromium。Mock 配置在健康门禁即被拒绝。真实评测要求提前提供 `QA_RUN_RAG_QUALITY`、`QA_ALLOW_QUALITY_WRITES`、`QA_QUALITY_REAL_MODELS_CONFIRMED`、RAG 集成写入门禁、`QA_RUN_DEEPEVAL` 和三个 Judge 环境变量，并安装 `.[test,eval]`。入口不会自动授权质量写入或切换模型。两个可选参数不能同时使用，旧 `-WithPerformance`、`-WithQuality` 参数已移除。
 
 每次生成唯一 `QA_RUN_ID`，原终端变量在退出时恢复。输出目录为 `reports/regression/<QA_RUN_ID>/`，含 `summary.json`、各阶段日志、JUnit XML、pytest HTML、Allure Results 和 UI 失败截图。可选性能 CSV/HTML 同样放在本轮目录；质量逐条报告沿用 `reports/quality/<QA_RUN_ID>/`。所有产物均由现有 Git 忽略规则覆盖。
 
 无论阶段成功或失败，都执行 `scripts/verify_run_cleanup.py`。业务清理由既有 Fixture/Locust 注册表执行；入口不增加删除逻辑。清理校验仅统计本轮前缀残留，非零残留或校验无法完成都会使整轮失败。进程被强制终止、主机断电时无法保证 finally 执行，应保留运行 ID 并人工核验。
 
-2026-09-08 默认模式实跑：隔离环境健康检查、API/Mock 回归 `16 passed`、Markdown 图片预览 UI 回归 `1 passed` 与清理校验均通过，退出码 0，耗时 49.76 秒。性能与真实质量评测仍需显式参数启用。
+2026-09-08 入口调整后默认实跑：API/Mock `16 passed`、UI `1 passed`、清理校验通过，退出码 0，总耗时 42.05 秒。`-Performance autosave` 单用户 15 秒冒烟总请求 10、失败 0（包含准备和清理），本轮简历残留 0。`-Quality` 在健康门禁拒绝 Mock，退出码 1，清理通过，未执行 API/UI 或真实质量基线。

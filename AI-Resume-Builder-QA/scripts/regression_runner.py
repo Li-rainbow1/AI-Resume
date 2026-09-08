@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+SCENARIOS = {'autosave': 'AUTOSAVE', 'rag_query': 'RAG_QUERY', 'file_upload': 'FILE_UPLOAD',
+             'image_worker_comparison': 'IMAGE_WORKER', 'interview_sse': 'INTERVIEW'}
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
@@ -32,7 +34,10 @@ async def health(real_allowed):
     checked = command(compose + ['config', '--quiet'])
     if checked.returncode:
         raise RuntimeError('隔离 Compose 配置无效，请检查 Docker 和 .env.test')
-    for service in ('backend', 'frontend', 'mock-ai', 'mysql', 'redis', 'pgvector', 'minio', 'image-worker'):
+    services_to_check = ('backend', 'mysql', 'redis', 'pgvector', 'minio', 'image-worker')
+    if not real_allowed:
+        services_to_check += ('frontend', 'mock-ai')
+    for service in services_to_check:
         result = command(compose + ['ps', '-q', service])
         cid = result.stdout.strip()
         if result.returncode or not cid:
@@ -58,15 +63,23 @@ async def health(real_allowed):
                 raise RuntimeError(f'{service} 未完全指向 Mock AI，拒绝默认回归')
     async with httpx.AsyncClient(base_url=settings.base_url, timeout=15) as client:
         (await client.get('/health')).raise_for_status()
-        (await client.get(settings.ui_base_url)).raise_for_status()
+        if not real_allowed:
+            (await client.get(settings.ui_base_url)).raise_for_status()
         session = await AuthClient(client).login_admin(settings.admin_username, settings.admin_password)
         client.headers['Authorization'] = f'Bearer {session.access_token}'
         services = await RagClient(client).list_system_services()
+        if real_allowed:
+            from quality.runtime_guard import real_model_guard_reason
+            reason = await real_model_guard_reason(RagClient(client))
+            if reason:
+                raise RuntimeError(reason)
         if not real_allowed:
             configs = {s['serviceKey']: s['config'] for s in services}
             if any(urlparse(configs.get(k, {}).get('baseUrl', '')).hostname != 'mock-ai' for k in ('chat', 'embedding', 'vision')):
                 raise RuntimeError('管理员生效配置未完全指向 Mock AI，拒绝默认回归')
-    # 真实启动浏览器验证依赖，缺失时由健康阶段明确失败。
+    if real_allowed:
+        return
+    # 默认回归真实启动浏览器验证依赖。
     from playwright.sync_api import sync_playwright
     def browser_check():
         with sync_playwright() as playwright:
@@ -78,20 +91,22 @@ async def health(real_allowed):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--report', type=Path, required=True)
-    parser.add_argument('--with-performance', action='store_true')
-    parser.add_argument('--with-quality', action='store_true')
+    parser.add_argument('--performance', default='')
+    parser.add_argument('--quality', action='store_true')
     args = parser.parse_args()
     os.chdir(ROOT)
     load_dotenv(ROOT / '.env.test', override=False)
     # 默认拒绝继承用户终端或本地配置中开启的高风险开关。
-    if not args.with_performance:
-        for key in list(os.environ):
-            if key.startswith(('PERF_RUN_', 'PERF_ALLOW_')):
-                os.environ[key] = '0'
-    if not args.with_quality:
+    selected = list(dict.fromkeys(args.performance.split(','))) if args.performance else []
+    for key in list(os.environ):
+        if key.startswith('PERF_RUN_') or (not selected and key.startswith('PERF_ALLOW_')):
+            os.environ[key] = '0'
+    if not args.quality:
         for key in ('QA_RUN_RAG_QUALITY', 'QA_ALLOW_QUALITY_WRITES', 'QA_QUALITY_REAL_MODELS_CONFIRMED', 'QA_RUN_DEEPEVAL'):
             os.environ[key] = '0'
-    os.environ.update(QA_RUN_UI='1', QA_RUN_RAG_INTEGRATION='1', QA_ALLOW_RAG_WRITES='1', QA_RUN_LIVE_CONTRACT='1')
+    os.environ['QA_RUN_UI'] = '0' if args.quality else '1'
+    if not args.quality:
+        os.environ.update(QA_RUN_RAG_INTEGRATION='1', QA_ALLOW_RAG_WRITES='1', QA_RUN_LIVE_CONTRACT='1')
     os.environ['PYTEST_ADDOPTS'] = ''
     stages = []
     started = time.monotonic()
@@ -125,25 +140,27 @@ def main():
             f'--alluredir={args.report / "allure-results"}', f'--html={args.report / (name + ".html")}', '--self-contained-html',
             '--browser', 'chromium', '--screenshot', 'only-on-failure', '--output', str(args.report / 'playwright')], junit)
     try:
-        if args.with_performance and args.with_quality:
+        if selected and args.quality:
             raise RuntimeError('性能与质量评测模型要求不同，请分次执行')
-        if args.with_quality:
+        if any(name not in SCENARIOS for name in selected):
+            raise RuntimeError('未知性能场景')
+        asyncio.run(health(args.quality))
+        if args.quality:
             from quality.settings import QualitySettings
             reason = QualitySettings.load().skip_reason(QaSettings.from_environment(), require_judge=True)
             if reason:
                 raise RuntimeError(reason)
-        asyncio.run(health(args.with_quality))
         stages.append(dict(name='health', exit_code=0))
-        pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/clients'])
-        pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py'])
-        if args.with_quality:
+        if args.quality:
             pytest_stage('quality', ['tests/quality/test_real_rag_quality.py'])
-        if args.with_performance:
+        else:
+            pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/clients'])
+            pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py'])
+        if selected:
             os.environ['LOCUST_HOST'] = QaSettings.from_environment().base_url
-            selected = []
-            for name, flag in [('autosave', 'AUTOSAVE'), ('rag_query', 'RAG_QUERY'), ('file_upload', 'FILE_UPLOAD'), ('image_worker_comparison', 'IMAGE_WORKER'), ('interview_sse', 'INTERVIEW')]:
-                if os.getenv('PERF_RUN_' + flag, '').lower() in {'1', 'true', 'yes', 'on'}:
-                    selected.append(name)
+            for name in selected:
+                os.environ['PERF_RUN_' + SCENARIOS[name]] = '1'
+                if name in SCENARIOS:
                     prefix = args.report / name
                     run_stage(name, [sys.executable, '-m', 'locust', '-f', f'performance/locustfiles/{name}.py', '--headless',
                         '--host', os.environ['LOCUST_HOST'], '-u', os.getenv('LOCUST_USERS', '1'), '-r', os.getenv('LOCUST_SPAWN_RATE', '1'),
@@ -154,8 +171,6 @@ def main():
                         if not any(int(row.get('Request Count') or 0) > 0 for row in rows) or any(int(row.get('Failure Count') or 0) for row in rows):
                             stages[-1]['exit_code'] = 1
                             stages[-1]['reason'] = 'Locust 无请求或存在失败请求'
-            if not selected:
-                raise RuntimeError('WithPerformance 未选择任何 PERF_RUN_* 场景')
     except Exception as exc:
         # 第三方异常不打印正文，避免连接信息泄露。
         reason = str(exc) if isinstance(exc, RuntimeError) else f'{type(exc).__name__}：请检查 Docker、Playwright Chromium 和隔离环境依赖'
@@ -168,6 +183,7 @@ def main():
             stages.append(dict(name='cleanup', exit_code=1, reason='清理校验未能完成'))
         code = next((s['exit_code'] for s in stages if s['exit_code']), 0)
         summary = dict(author='jf', run_id=os.environ['QA_RUN_ID'], exit_code=code,
+            performance=selected, quality=args.quality,
             seconds=round(time.monotonic()-started, 2), stages=stages, report_path=str(args.report))
         (args.report / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     return code
