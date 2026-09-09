@@ -18,7 +18,7 @@ def upload_document(client, document):
             manifest[key].append({"index": index, "relativePath": asset.relative_path})
         data = {"manifest": json.dumps(manifest, ensure_ascii=False)}
     started = monotonic_ms()
-    with client.post(endpoint, files=files, data=data, name=endpoint, stream=True, catch_response=True) as response:
+    with client.post(endpoint, files=files, data=data, name=endpoint, stream=True, catch_response=True, timeout=180) as response:
         if response.status_code != 200:
             response.failure(f"上传 HTTP {response.status_code}")
             return None, None
@@ -36,35 +36,27 @@ def upload_document(client, document):
         return result, stream
 
 
-def poll_enrichment(client, document_id: str, timeout_seconds: float, interval_seconds: float):
+def poll_image_parsing(client, document_id: str, timeout_seconds: float, interval_seconds: float):
     started = monotonic_ms()
     deadline = time.monotonic() + timeout_seconds
     last = None
-    queue_wait_ms = None
     while time.monotonic() < deadline:
         with client.get(
             f"/api/ai/rag/documents/{document_id}/image-enrichment",
             name="/api/ai/rag/documents/{id}/image-enrichment",
             catch_response=True,
+            timeout=min(30, max(0.1, deadline - time.monotonic())),
         ) as response:
             if response.status_code != 200:
                 response.failure(f"图片状态 HTTP {response.status_code}")
                 break
             last = response.json()
             response.success()
-        if queue_wait_ms is None and str(last.get("status")) != "queued":
-            queue_wait_ms = monotonic_ms() - started
-            record_metric("图片队列等待时间", queue_wait_ms)
         if str(last.get("status")) not in {"queued", "processing"}:
             elapsed = monotonic_ms() - started
-            failure = None if last.get("status") == "completed" else f"图片状态 {last.get('status')}"
-            record_metric("图片增强完整时间", elapsed, failure)
             return last, elapsed
         time.sleep(interval_seconds)
     elapsed = monotonic_ms() - started
-    if queue_wait_ms is None:
-        record_metric("图片队列等待时间", elapsed, "队列等待超时")
-    record_metric("图片增强完整时间", elapsed, "轮询超时")
     return last, elapsed
 
 

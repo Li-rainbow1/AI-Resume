@@ -27,7 +27,6 @@ class PerformanceSettings:
     image_poll_interval_seconds: float
     task_wait_min_seconds: float
     task_wait_max_seconds: float
-    autosave_interval_seconds: float
 
     @classmethod
     def load(cls) -> "PerformanceSettings":
@@ -52,7 +51,6 @@ class PerformanceSettings:
             image_poll_interval_seconds=float(os.getenv("QA_IMAGE_POLL_INTERVAL_SECONDS", "1")),
             task_wait_min_seconds=float(os.getenv("PERF_TASK_WAIT_MIN_SECONDS", "1")),
             task_wait_max_seconds=float(os.getenv("PERF_TASK_WAIT_MAX_SECONDS", "2")),
-            autosave_interval_seconds=float(os.getenv("PERF_AUTOSAVE_INTERVAL_SECONDS", "2")),
         )
 
     def require(self, scenario_flag: str, write_flag: str) -> None:

@@ -60,9 +60,15 @@ class PerformanceDataFactory:
             path = self.root / f"qa-rag-{self.run_id}-{uid}.pdf"
             pdf = canvas.Canvas(str(path), pagesize=A4)
             pdf.setAuthor("jf")
-            pdf.drawString(72, 780, f"QA marker: {marker}")
-            if image_paths:
-                pdf.drawImage(ImageReader(str(image_paths[0])), 72, 520, width=360, height=120)
+            for index, image_path in enumerate(image_paths, start=1):
+                pdf.drawString(72, 780, "QA 图片解析性能固定正文")
+                pdf.drawString(72, 756, f"QA marker: {marker}")
+                pdf.drawString(72, 732, f"图片序号：{index}")
+                pdf.drawImage(ImageReader(str(image_path)), 72, 480, width=420, height=140)
+                if index < len(image_paths):
+                    pdf.showPage()
+            if not image_paths:
+                pdf.drawString(72, 780, f"QA marker: {marker}")
             pdf.save()
             assets = [UploadAsset(path, "application/pdf", path.name)]
         elif kind == "docx":
@@ -71,8 +77,9 @@ class PerformanceDataFactory:
             doc.core_properties.author = "jf"
             doc.add_heading("QA 性能测试知识文档", 1)
             doc.add_paragraph(f"唯一标记：{marker}")
-            if image_paths:
-                doc.add_picture(str(image_paths[0]))
+            for index, image_path in enumerate(image_paths, start=1):
+                doc.add_paragraph(f"图片序号：{index}")
+                doc.add_picture(str(image_path))
             doc.save(path)
             assets = [UploadAsset(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", path.name)]
         else:
@@ -84,7 +91,8 @@ class PerformanceDataFactory:
         target = self.root.resolve()
         if runtime_root not in target.parents or self.run_id not in target.parts:
             raise RuntimeError("本地生成数据目录不满足隔离清理规则")
-        shutil.rmtree(target, ignore_errors=True)
+        if target.exists():
+            shutil.rmtree(target)
         run_root = target.parent
         if run_root.parent == runtime_root and run_root.name == self.run_id and run_root.exists() and not any(run_root.iterdir()):
             run_root.rmdir()
@@ -96,9 +104,10 @@ class PerformanceDataFactory:
         image = Image.new("RGB", (720, 240), "white")
         draw = ImageDraw.Draw(image)
         draw.rectangle((12, 12, 708, 228), outline="black", width=3)
-        draw.text((40, 90), f"QA IMAGE {index} {uid[:10]}", fill="black")
+        # 每次文档只变更隔离标识；六张图片本身保持相同字节，避免输入差异干扰对比。
+        draw.text((40, 90), f"QA IMAGE {index}", fill="black")
         metadata = PngImagePlugin.PngInfo()
         metadata.add_text("Author", "jf")
-        metadata.add_text("QA", json.dumps({"runId": self.run_id, "index": index}))
+        metadata.add_text("QA", json.dumps({"fixture": "image-parser", "index": index}))
         image.save(path, pnginfo=metadata)
         return path

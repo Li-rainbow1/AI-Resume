@@ -30,7 +30,14 @@ class QaPerformanceUser(HttpUser):
         self.registry = ResourceRegistry(self.client, SETTINGS, session.user_id)
 
     def on_stop(self) -> None:
-        if hasattr(self, "registry"):
-            self.registry.cleanup()
-        if hasattr(self, "data_factory"):
-            self.data_factory.cleanup()
+        try:
+            try:
+                if hasattr(self, "registry"):
+                    self.registry.cleanup()
+            finally:
+                if hasattr(self, "data_factory"):
+                    self.data_factory.cleanup()
+        except Exception:
+            # Locust 用户退出异常不能只记日志，必须传递到最终退出码。
+            self.environment.process_exit_code = 1
+            raise

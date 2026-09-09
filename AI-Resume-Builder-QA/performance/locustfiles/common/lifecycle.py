@@ -1,4 +1,6 @@
 # author: jf
+import json
+
 import pymysql
 
 
@@ -18,9 +20,14 @@ class ResourceRegistry:
         self.expected_document_names.add(name)
 
     def cleanup(self) -> None:
-        self._cleanup_documents()
-        self._cleanup_resumes()
-        self._cleanup_sessions()
+        errors: list[str] = []
+        for cleanup in (self._cleanup_documents, self._cleanup_resumes, self._cleanup_sessions):
+            try:
+                cleanup()
+            except Exception as exc:
+                errors.append(str(exc))
+        if errors:
+            raise RuntimeError("性能测试数据清理失败：" + "；".join(errors))
 
     def _cleanup_documents(self) -> None:
         if not self.expected_document_names and not self.documents:
@@ -34,7 +41,7 @@ class ResourceRegistry:
                 name="/api/ai/rag/documents [cleanup]",
             )
             if response.status_code != 200:
-                break
+                raise RuntimeError(f"知识文档清理列表 HTTP {response.status_code}")
             body = response.json()
             for item in response.json().get("items") or []:
                 name = str(item.get("fileName") or "")
@@ -49,6 +56,8 @@ class ResourceRegistry:
             response = self.client.delete(f"/api/ai/rag/documents/{document_id}", name="/api/ai/rag/documents/{id} [cleanup]")
             if response.status_code == 200:
                 self.documents.pop(document_id, None)
+            else:
+                raise RuntimeError(f"知识文档清理 HTTP {response.status_code}")
 
     def _cleanup_resumes(self) -> None:
         for resume_id, name in list(self.resumes.items()):
@@ -66,6 +75,7 @@ class ResourceRegistry:
                     response.success()
                 else:
                     response.failure(f"简历清理 HTTP {response.status_code}")
+                    raise RuntimeError(f"简历清理 HTTP {response.status_code}")
 
     def _cleanup_sessions(self) -> None:
         for session_id in list(self.sessions):
@@ -77,8 +87,41 @@ class ResourceRegistry:
                     (session_id, self.user_id),
                 )
                 connection.commit()
-                if cursor.rowcount == 1:
-                    self.sessions.discard(session_id)
+                # 回合可能在落库前失败；此时不存在精确 ID 也代表没有残留。
+                self.sessions.discard(session_id)
+
+    def verify_interview_request(self, session_id: str, request_id: str) -> bool:
+        """核验服务端已落库的会话归属，防止流式结果串到其他请求。"""
+        if session_id not in self.sessions or not request_id:
+            return False
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT last_request_id, completed_request_ids_json, last_response_json
+                FROM interview_sessions
+                WHERE session_id=%s AND user_id=%s
+                """,
+                (session_id, self.user_id),
+            )
+            row = cursor.fetchone()
+            cursor.execute(
+                "SELECT role, content FROM interview_session_messages WHERE session_id=%s ORDER BY seq_no DESC LIMIT 2",
+                (session_id,),
+            )
+            messages = cursor.fetchall()
+        if not row or str(row[0] or "") != request_id:
+            return False
+        try:
+            completed = json.loads(row[1] or "[]")
+            response = json.loads(row[2] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        return (
+            isinstance(completed, list) and request_id in completed
+            and isinstance(response, dict) and request_id in str(response.get("assistantReply") or "")
+            and len(messages) == 2 and {item[0] for item in messages} == {"user", "assistant"}
+            and all(request_id in str(item[1]) for item in messages)
+        )
 
     def _delete_exact_resume(self, resume_id: str, name: str) -> bool:
         with self._connection() as connection, connection.cursor() as cursor:

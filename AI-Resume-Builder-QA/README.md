@@ -5,13 +5,13 @@
 
 ## 当前阶段
 
-pytest + httpx、本地隔离 QA 环境、单条 Playwright UI 主链、五项 Locust 性能脚本及第一版 AI/RAG 质量评测脚本已建立。Locust 已完成单用户短时冒烟；真实模型质量基线和正式性能基线尚未执行。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
+pytest + httpx、本地隔离 QA 环境、单条 Playwright UI 主链、两项收敛后的性能编排及第一版 AI/RAG 质量评测脚本已建立。历史五项 Locust 短时冒烟记录仍保留；真实模型质量基线和正式性能基线尚未执行。隔离环境使用独立容器、网络、端口和数据卷，不连接现有业务数据库。
 
 ## 当前文档
 
 - `docs/自动化与性能测试范围决策.md`：当前测试范围、工具选型、实施顺序和证据口径。
 - `docs/第一阶段自动化测试执行记录.md`：接口自动化与核心 UI 回归执行证据。
-- `docs/Locust性能测试冒烟执行记录.md`：五项性能场景的小流量冒烟记录。
+- `docs/Locust性能测试冒烟执行记录.md`：历史五项性能场景的小流量冒烟记录与当前范围说明。
 - `docs/AI-RAG质量评测执行记录.md`：Golden Dataset 与质量评测基础设施执行记录。
 - `docs/接口清单.md`：34 个 REST 接口和实时语音 WebSocket 的调用、权限、输入输出与风险。
 - `docs/角色权限矩阵.md`：游客、普通用户和管理员的页面、接口与数据归属边界。
@@ -30,17 +30,37 @@ clients/              鉴权、SSE 与 RAG 接口客户端
 fixtures/             配置、管理员 Token、数据工厂与清理器
 tests/api/            RAG 主链接口自动化
 tests/mock/           Mock AI 契约测试
+tests/interview/      AI 面试上下文、压缩与流式完整性边界
 tests/ui/             Markdown 图片预览 Playwright 场景
+                      AI 面试断流、连续失败与成功重试场景
 pages/                登录、知识库与 Markdown 预览 Page Object
 testdata/             测试数据生成规则
 mock_server/          OpenAI-compatible Mock AI
 reports/              JUnit、临时数据与运行产物
-performance/          五项 Locust 场景、公共组件、脱敏问题与 Worker 对比入口
+performance/          图片解析与 AI 面试 SSE 性能编排、公共组件和报告说明
 quality/              Golden Dataset 加载、确定性指标、DeepEval、Bad Case 与报告
 tests/quality/        指标单元验证和真实 RAG 质量基线入口
 ```
 
-## 执行方式
+## 启动与执行
+
+### 启动 QA 环境
+
+日常启动只需运行：
+
+```powershell
+.\scripts\start_qa.ps1
+```
+
+脚本会在缺少 `.env.test` 时自动生成本机隔离配置，启动所有 QA 容器并等待后端、Mock AI 与前端可访问。业务或前端镜像有更新时，显式传入 `-Build`：
+
+```powershell
+.\scripts\start_qa.ps1 -Build
+```
+
+首次使用仍需先安装 Python 测试依赖；脚本不会自动安装依赖或覆盖已有 `.env.test`。
+
+### 首次安装与执行
 
 ```powershell
 python -m venv .venv
@@ -90,7 +110,7 @@ $env:QA_RUN_UI = '1'
 
 UI 用例上传前登记带 `QA_RUN_ID` 的完整文件名。正常删除、断言失败或 pytest 中断退出时，清理 Fixture 都会再次分页查询并仅删除完全匹配的本轮文档。本地生成的 Markdown 和图片只位于 pytest 临时目录，不会删除源文件。
 
-Locust 的五个独立场景、门禁、报告和 Worker 1/3 切换方式见 [`performance/README.md`](performance/README.md)。运行产物位于 `reports/locust/` 且不会进入 Git。
+当前两项性能场景的门禁、报告、图片解析三组对比和 SSE 分级负载方式见 [`performance/README.md`](performance/README.md)。运行产物位于 `reports/` 且不会进入 Git。
 
 AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置和报告结构见 [`quality/README.md`](quality/README.md)。当前隔离 Compose 使用 Mock AI，真实质量用例会在上传前安全跳过，不会生成虚假的质量基线。
 
@@ -104,8 +124,10 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 - 已记录：`413`、Embedding 批量上限、RAG TopK、实时语音多进程问题均有缺陷文档；真实浏览器/多 worker 回归以各缺陷文档的未执行项为准。
 - 已完成：第一阶段 pytest/httpx、管理员鉴权 Fixture、运行 ID 隔离数据、自动清理、Mock AI 与 RAG 主链用例。
 - 已执行：本地隔离环境全套 `16 passed`；Markdown/PDF/DOCX 三格式 RAG 主链 `3 passed`，当前运行 ID 残留文档数为 0。
-- 已执行：Chromium 下 Markdown 图片附件上传、图片增强、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
-- 已执行：五项 Locust 脚本的小流量冒烟；正式性能基线、容量结论和优化结论均未执行。
+- 2026-09-09 增量验证：上下文完整性用例并入一键入口后，API/Mock `24 passed`、UI `1 passed`、清理校验通过；覆盖富文本简历提取、超阈值摘要、摘要失败回滚、严格流式结束和请求幂等。
+- 2026-09-09 隔离接口冒烟：AI 面试首轮实际收到 `accepted/processing/chunk/done`，相同 `requestId` 重试只恢复缓存结果；临时面试会话已按精确 ID 清理。
+- 已执行：Chromium 下 Markdown 图片附件上传、图片解析、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
+- 历史范围：五项 Locust 脚本曾完成小流量冒烟；当前性能范围收敛为图片解析串行/并发对比和 AI 面试 SSE 流式性能。正式性能基线、容量结论和优化结论均未执行。
 - 已实现：15 条 Golden Dataset、七项确定性指标、DeepEval 四项指标、Bad Case 分类和质量报告；指标单元验证已执行。
 - 未执行：真实 Chat、Embedding、Vision/OCR 与固定 Judge 的小规模质量基线；当前 Mock AI 隔离环境不满足真实性门禁。
 - 本轮未做：正式 AI/RAG 质量门禁和远端推送；本地一键回归状态见下文。
@@ -113,17 +135,19 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 
 ## 本地一键回归
 
+2026-09-09 复审修复后：默认 API/Mock **26 passed**、UI **2 passed**，清理通过。运行报告为 `reports/regression/reg-d5255f40af3c4ba1807b9787/summary.json`。UI 新增 AI 面试缺少 done、连续失败及恢复成功的草稿替换验证，浏览器拦截模拟面试响应，不调用真实模型。
+
 ```powershell
 .\scripts\run_regression.ps1
-.\scripts\run_regression.ps1 -Performance autosave,rag_query
+.\scripts\run_regression.ps1 -Performance image_worker_comparison,interview_sse
 .\scripts\run_regression.ps1 -Quality
 ```
 
 前置条件：QA `.venv` 已安装 `.[test]`、Playwright Chromium 已安装，`.env.test` 中隔离账号有效，既有 Compose 服务已启动且健康。入口不安装依赖、不启动或重建容器。默认检查运行中服务、localhost 绑定端口、后端和 Worker 模型地址、管理员生效配置及 Chromium 启动能力。
 
-默认依次执行健康检查、`tests/api`、`tests/mock`、`tests/clients`、Markdown 图片预览 UI 回归和现有清理校验。UI 强制启用；pytest 零用例、任一 skip、失败或报告缺失均返回非零。默认覆盖进程中继承的性能和质量开关为关闭；接口及 UI 的合成文档写入只在核验 Mock AI 的隔离 QA 环境执行。不会调用真实 Chat、Embedding、Vision/OCR 或 Judge。
+默认依次执行健康检查、`tests/api`、`tests/mock`、`tests/clients`、`tests/interview`、Markdown 图片预览 UI 回归和现有清理校验。UI 强制启用；pytest 零用例、任一 skip、失败或报告缺失均返回非零。默认覆盖进程中继承的性能和质量开关为关闭；接口及 UI 的合成文档写入只在核验 Mock AI 的隔离 QA 环境执行。不会调用真实 Chat、Embedding、Vision/OCR 或 Judge。
 
-`-Performance autosave,rag_query` 在默认 Mock 回归后追加指定场景。可选值为 `autosave`、`rag_query`、`file_upload`、`image_worker_comparison`、`interview_sse`，入口仅启用对应 `PERF_RUN_*`，忽略环境中其他场景开关，不修改对应 `PERF_ALLOW_*` 写入授权。沿用 `LOCUST_USERS`、`LOCUST_SPAWN_RATE`、`LOCUST_RUN_TIME`，缺省 1 用户、每秒 1 用户、15 秒。图片场景使用当前 Worker 并发配置，不切换 1/3 或重建容器；独立对比入口仍见性能说明。
+`-Performance image_worker_comparison,interview_sse` 在默认 Mock 回归后追加指定场景。可选值仅为 `image_worker_comparison`、`interview_sse`；入口仅启用对应 `PERF_RUN_*`，忽略环境中其他场景开关，不修改对应 `PERF_ALLOW_*` 写入授权。图片解析场景会在三个专属隔离 Compose 组中依次比较旧同步串行、新异步并发 1 和新异步并发 3；SSE 场景按 1、5、10 用户分别预热和测量。命令、Mock 口径和报告结构见性能说明。
 
 `-Quality` 只执行真实模型健康门禁、质量评测及清理校验，不运行 API/UI，也不检查前端或启动 Chromium。Mock 配置在健康门禁即被拒绝。真实评测要求提前提供 `QA_RUN_RAG_QUALITY`、`QA_ALLOW_QUALITY_WRITES`、`QA_QUALITY_REAL_MODELS_CONFIRMED`、RAG 集成写入门禁、`QA_RUN_DEEPEVAL` 和三个 Judge 环境变量，并安装 `.[test,eval]`。入口不会自动授权质量写入或切换模型。两个可选参数不能同时使用，旧 `-WithPerformance`、`-WithQuality` 参数已移除。
 
@@ -131,4 +155,4 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 
 无论阶段成功或失败，都执行 `scripts/verify_run_cleanup.py`。业务清理由既有 Fixture/Locust 注册表执行；入口不增加删除逻辑。清理校验仅统计本轮前缀残留，非零残留或校验无法完成都会使整轮失败。进程被强制终止、主机断电时无法保证 finally 执行，应保留运行 ID 并人工核验。
 
-2026-09-08 入口调整后默认实跑：API/Mock `16 passed`、UI `1 passed`、清理校验通过，退出码 0，总耗时 42.05 秒。`-Performance autosave` 单用户 15 秒冒烟总请求 10、失败 0（包含准备和清理），本轮简历残留 0。`-Quality` 在健康门禁拒绝 Mock，退出码 1，清理通过，未执行 API/UI 或真实质量基线。
+2026-09-08 入口调整后默认实跑：API/Mock `16 passed`、UI `1 passed`、清理校验通过，退出码 0，总耗时 42.05 秒。历史范围的 `-Performance autosave` 单用户 15 秒冒烟总请求 10、失败 0（包含准备和清理），本轮简历残留 0。`-Quality` 在健康门禁拒绝 Mock，退出码 1，清理通过，未执行 API/UI 或真实质量基线。

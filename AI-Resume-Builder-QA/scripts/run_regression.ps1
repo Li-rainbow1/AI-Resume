@@ -1,7 +1,7 @@
 # author: jf
 [CmdletBinding()]
 param(
-    [ValidateSet('autosave', 'rag_query', 'file_upload', 'image_worker_comparison', 'interview_sse')]
+    [ValidateSet('image_worker_comparison', 'interview_sse')]
     [string[]]$Performance,
     [switch]$Quality
 )

@@ -2,7 +2,6 @@
 """编排现有命令，所有业务创建和清理由既有 Fixture 负责。"""
 import argparse
 import asyncio
-import csv
 import json
 import os
 from pathlib import Path
@@ -13,8 +12,10 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIOS = {'autosave': 'AUTOSAVE', 'rag_query': 'RAG_QUERY', 'file_upload': 'FILE_UPLOAD',
-             'image_worker_comparison': 'IMAGE_WORKER', 'interview_sse': 'INTERVIEW'}
+SCENARIOS = {
+    'image_worker_comparison': 'IMAGE_WORKER',
+    'interview_sse': 'INTERVIEW',
+}
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
@@ -95,9 +96,10 @@ def main():
     parser.add_argument('--quality', action='store_true')
     args = parser.parse_args()
     os.chdir(ROOT)
+    args.report.mkdir(parents=True, exist_ok=True)
     load_dotenv(ROOT / '.env.test', override=False)
     # 默认拒绝继承用户终端或本地配置中开启的高风险开关。
-    selected = list(dict.fromkeys(args.performance.split(','))) if args.performance else []
+    selected = list(dict.fromkeys(item.strip() for item in args.performance.split(',') if item.strip())) if args.performance else []
     for key in list(os.environ):
         if key.startswith('PERF_RUN_') or (not selected and key.startswith('PERF_ALLOW_')):
             os.environ[key] = '0'
@@ -154,23 +156,31 @@ def main():
         if args.quality:
             pytest_stage('quality', ['tests/quality/test_real_rag_quality.py'])
         else:
-            pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/clients'])
-            pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py'])
+            pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/clients', 'tests/interview'])
+            pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py', 'tests/ui/test_interview_retry.py'])
         if selected:
-            os.environ['LOCUST_HOST'] = QaSettings.from_environment().base_url
             for name in selected:
                 os.environ['PERF_RUN_' + SCENARIOS[name]] = '1'
-                if name in SCENARIOS:
-                    prefix = args.report / name
-                    run_stage(name, [sys.executable, '-m', 'locust', '-f', f'performance/locustfiles/{name}.py', '--headless',
-                        '--host', os.environ['LOCUST_HOST'], '-u', os.getenv('LOCUST_USERS', '1'), '-r', os.getenv('LOCUST_SPAWN_RATE', '1'),
-                        '-t', os.getenv('LOCUST_RUN_TIME', '15s'), '--csv', str(prefix), '--html', str(prefix) + '.html'])
-                    if stages[-1]['exit_code'] == 0:
-                        with Path(str(prefix) + '_stats.csv').open(encoding='utf-8-sig') as stream:
-                            rows = list(csv.DictReader(stream))
-                        if not any(int(row.get('Request Count') or 0) > 0 for row in rows) or any(int(row.get('Failure Count') or 0) for row in rows):
-                            stages[-1]['exit_code'] = 1
-                            stages[-1]['reason'] = 'Locust 无请求或存在失败请求'
+                report_root = args.report / name
+                if name == 'image_worker_comparison':
+                    command_args = [
+                        sys.executable,
+                        'performance/run_image_worker_comparison.py',
+                        '--report-root',
+                        str(report_root),
+                        '--run-id',
+                        os.environ['QA_RUN_ID'],
+                    ]
+                else:
+                    command_args = [
+                        sys.executable,
+                        'performance/run_interview_sse_baseline.py',
+                        '--report-root',
+                        str(report_root),
+                        '--run-id',
+                        os.environ['QA_RUN_ID'],
+                    ]
+                run_stage(name, command_args)
     except Exception as exc:
         # 第三方异常不打印正文，避免连接信息泄露。
         reason = str(exc) if isinstance(exc, RuntimeError) else f'{type(exc).__name__}：请检查 Docker、Playwright Chromium 和隔离环境依赖'
