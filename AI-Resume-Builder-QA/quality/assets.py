@@ -24,27 +24,18 @@ class QualityAssetFactory:
         uid = uuid4().hex
         asset_dir = self.root / "assets"
         asset_dir.mkdir(parents=True, exist_ok=True)
-        badge = self._draw_text_image(
-            asset_dir / "quality-ocr-badge.png",
-            ["ACCESS CODE: LIME-482", "REGION: EAST-7", "VALID DAYS: 45"],
-        )
-        table = self._draw_table(asset_dir / "quality-capacity-table.png")
-        flow = self._draw_flow(asset_dir / "quality-review-flow.png")
+        source_root = Path(__file__).resolve().parents[1] / "testdata" / "quality" / "corpus"
+        image_names = ("quality-ocr-badge.png", "quality-capacity-table.png", "quality-review-flow.png")
+        # 固定图片像素，运行时只写入本轮元数据，避免系统字体差异改变评测素材。
+        for image_name in image_names:
+            with Image.open(source_root / "assets" / image_name) as image:
+                self._save(image, asset_dir / image_name)
+        badge, table, flow = (asset_dir / image_name for image_name in image_names)
         file_name = f"qa-rag-{self.run_id}-{uid}-quality-corpus.md"
         markdown = self.root / file_name
-        markdown.write_text(
-            "<!-- author: jf -->\n"
-            "# Aster 项目知识卡\n\n"
-            "## 基本信息\n\n"
-            "项目代号是 Cedar-27，服务目标可用性为 99.7%。维护团队名为 Northwind。\n\n"
-            "## 支持安排\n\n"
-            "固定支持窗口为每周二和周四 14:00 至 16:00。升级联系人使用代号 Echo-9。\n\n"
-            "## 图片资料\n\n"
-            "![访问徽章](assets/quality-ocr-badge.png)\n\n"
-            "![容量表](assets/quality-capacity-table.png)\n\n"
-            "![审核流程](assets/quality-review-flow.png)\n",
-            encoding="utf-8",
-        )
+        # 人工可查阅的正文与真实评测使用同一份素材，避免两份事实漂移。
+        source = source_root / "quality-corpus.md"
+        markdown.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         return QualityCorpus(
             assets=[
                 UploadAsset(markdown, "text/markdown", markdown.name),

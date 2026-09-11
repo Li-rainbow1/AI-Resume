@@ -13,15 +13,27 @@ def normalize_text(value: object) -> str:
     return re.sub(r"\s+|[，。！？、；：,.!?;:\-_/]", "", str(value or "")).lower()
 
 
+def _fact_matches(answer: str, fact: str) -> bool:
+    normalized_answer = normalize_text(answer)
+    alternatives = [normalize_text(item) for item in str(fact or "").split("|")]
+    for candidate in alternatives:
+        if not candidate:
+            continue
+        if re.search(r"\d", candidate):
+            if re.search(rf"(?<!\d){re.escape(candidate)}(?!\d)", normalized_answer):
+                return True
+        elif candidate in normalized_answer:
+            return True
+    return False
+
+
 def fact_coverage(answer: str, facts: list[str]) -> float:
-    normalized = normalize_text(answer)
-    return sum(normalize_text(fact) in normalized for fact in facts) / len(facts) if facts else 1.0
+    return sum(_fact_matches(answer, fact) for fact in facts) / len(facts) if facts else 1.0
 
 
 def forbidden_fact_rate(answer: str, forbidden_facts: list[str]) -> float:
-    normalized = normalize_text(answer)
     return (
-        sum(normalize_text(fact) in normalized for fact in forbidden_facts) / len(forbidden_facts)
+        sum(_fact_matches(answer, fact) for fact in forbidden_facts) / len(forbidden_facts)
         if forbidden_facts
         else 0.0
     )
@@ -43,25 +55,28 @@ def source_matches(source: dict[str, Any], expected_document: str, location: dic
     return True
 
 
-def recall_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float:
+def recall_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
     if case.question_type == "no_answer":
-        return 1.0 if not sources else 0.0
+        return None
     expected = case.expected_source_location
     hits = sum(any(source_matches(source, case.expected_document, location) for source in sources[: case.top_k]) for location in expected)
     return hits / len(expected) if expected else 0.0
 
 
-def source_hit_rate(case: GoldenCase, sources: list[dict[str, Any]]) -> float:
+def source_hit_rate(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+    if case.question_type == "no_answer":
+        return None
     considered = sources[: case.top_k]
     if not considered:
-        return 1.0 if case.question_type == "no_answer" else 0.0
+        # 无答案用例已在上面返回 None，走到这里只会是有答案用例：没有召回到任何来源即记 0 分。
+        return 0.0
     relevant = sum(source_matches(source, case.expected_document) for source in considered)
     return relevant / len(considered)
 
 
-def image_knowledge_hit(case: GoldenCase, sources: list[dict[str, Any]]) -> float:
+def image_knowledge_hit(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
     if case.question_type not in {"image_ocr", "table_or_flow", "mixed"}:
-        return 1.0
+        return None
     for source in sources[: case.top_k]:
         metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
         if metadata.get("ingestSource") == "image_vision" and any(
@@ -76,10 +91,10 @@ def no_answer_rejection(case: GoldenCase, answer: str, sources: list[dict[str, A
         return 1.0
     normalized = normalize_text(answer)
     refused = any(normalize_text(marker) in normalized for marker in REFUSAL_MARKERS)
-    return 1.0 if refused and not sources else 0.0
+    return 1.0 if refused and forbidden_fact_rate(answer, case.forbidden_facts) == 0 else 0.0
 
 
-def evaluate_case(case: GoldenCase, answer: str, sources: list[dict[str, Any]]) -> dict[str, float]:
+def evaluate_case(case: GoldenCase, answer: str, sources: list[dict[str, Any]]) -> dict[str, float | None]:
     return {
         "recall_at_k": recall_at_k(case, sources),
         "source_hit_rate": source_hit_rate(case, sources),
@@ -95,7 +110,7 @@ def repeated_run_stability(results: list[tuple[str, list[dict[str, Any]]]], expe
         return 1.0
     signatures: list[set[str]] = []
     for answer, sources in results:
-        facts = {fact for fact in expected_facts if normalize_text(fact) in normalize_text(answer)}
+        facts = {fact for fact in expected_facts if _fact_matches(answer, fact)}
         documents = {
             str((source.get("metadata") or {}).get("documentId"))
             for source in sources

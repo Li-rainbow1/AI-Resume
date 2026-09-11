@@ -49,10 +49,16 @@ def write_reports(
             }
             row.update({name: values.get("score") for name, values in result.deepeval_metrics.items()})
             writer.writerow(row)
-    aggregate = {
-        name: sum(result.deterministic_metrics.get(name, 0.0) for result in results) / len(results)
-        for name in metric_names
-    } if results else {}
+    aggregate: dict[str, float | None] = {}
+    aggregate_evaluated_count: dict[str, int] = {}
+    for name in metric_names:
+        values = [
+            float(result.deterministic_metrics[name])
+            for result in results
+            if isinstance(result.deterministic_metrics.get(name), (int, float))
+        ]
+        aggregate[name] = sum(values) / len(values) if values else None
+        aggregate_evaluated_count[name] = len(values)
     deepeval_aggregate = {name: _aggregate_judge_metric(results, name) for name in judge_names}
     summary = {
         "author": "jf",
@@ -61,6 +67,7 @@ def write_reports(
         "passed_count": sum(result.passed for result in results),
         "failed_count": sum(not result.passed for result in results),
         "aggregate": aggregate,
+        "aggregate_evaluated_count": aggregate_evaluated_count,
         "deepeval_aggregate": deepeval_aggregate,
         "config_summary": config_summary,
     }

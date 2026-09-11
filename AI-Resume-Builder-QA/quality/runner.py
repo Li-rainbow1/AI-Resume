@@ -64,9 +64,9 @@ async def run_quality_evaluation(
         registry.register(document_id, corpus.expected_file_name)
         enrichment = await rag_client.poll_image_enrichment(document_id, image_timeout, image_interval)
         if enrichment.get("status") != "completed" or int(enrichment.get("failedCount") or 0) > 0:
-            raise AssertionError("图片增强未完成或存在失败记录")
+            raise AssertionError("图片解析未完成或存在失败记录")
     except Exception as exc:
-        # 上传和图片增强失败时仍生成逐条证据，异常正文不会进入报告。
+        # 上传和图片解析失败时仍生成逐条证据，异常正文不会进入报告。
         setup_results: list[CaseResult] = []
         for case in cases:
             metrics = evaluate_case(case, "", [])
@@ -126,13 +126,19 @@ async def run_quality_evaluation(
             except Exception as exc:
                 result.bad_case_categories.append("上游模型或网络失败")
                 result.failure_reasons.append(f"Judge 执行失败：{type(exc).__name__}")
+        def _one_or_not_applicable(value: float | None) -> bool:
+            return value is None or value == 1
+
+        def _positive_or_not_applicable(value: float | None) -> bool:
+            return value is None or value > 0
+
         deterministic_passed = (
-            metrics["recall_at_k"] == 1
-            and metrics["source_hit_rate"] > 0
-            and metrics["image_knowledge_hit_rate"] == 1
+            _one_or_not_applicable(metrics["recall_at_k"])
+            and _positive_or_not_applicable(metrics["source_hit_rate"])
+            and _one_or_not_applicable(metrics["image_knowledge_hit_rate"])
             and metrics["fact_coverage_rate"] == 1
             and metrics["forbidden_fact_hit_rate"] == 0
-            and metrics["no_answer_rejection_rate"] == 1
+            and _one_or_not_applicable(metrics["no_answer_rejection_rate"])
             and metrics["repeated_run_stability"] == 1
         )
         judge_passed = not include_deepeval or (

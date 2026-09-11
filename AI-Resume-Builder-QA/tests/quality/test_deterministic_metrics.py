@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from quality.dataset import load_golden_dataset
+from quality.assets import QualityAssetFactory
 from quality.metrics import evaluate_case, repeated_run_stability
 from quality.models import CaseResult
 from quality.reporting import write_reports
@@ -18,9 +19,48 @@ def test_golden_dataset_has_required_coverage() -> None:
     counts = {question_type: sum(case.question_type == question_type for case in cases) for question_type in {
         "text", "image_ocr", "table_or_flow", "mixed", "no_answer"
     }}
-    assert len(cases) == 15
-    assert counts == {"text": 4, "image_ocr": 4, "table_or_flow": 2, "mixed": 2, "no_answer": 3}
-    assert all(case.forbidden_facts for case in cases)
+    assert len(cases) == 20
+    assert counts == {"text": 6, "image_ocr": 4, "table_or_flow": 4, "mixed": 3, "no_answer": 3}
+    # 旧版本的正确数值允许出现在对比解释中，不强制为每题指定禁词。
+    assert next(case for case in cases if case.case_id == "TXT-005").forbidden_facts == []
+
+
+def test_quality_materials_and_reference_answers_are_consistent(tmp_path: Path) -> None:
+    from PIL import Image
+
+    data_root = Path(__file__).resolve().parents[2] / "testdata" / "quality"
+    cases = load_golden_dataset(data_root / "golden_dataset.jsonl")
+    corpus = QualityAssetFactory(tmp_path, "dataset-offline").create()
+    generated = tmp_path / corpus.expected_file_name
+    text = generated.read_text(encoding="utf-8")
+    assert text == (data_root / "corpus" / "quality-corpus.md").read_text(encoding="utf-8")
+    assert len(corpus.assets) == 4
+    # 图片事实不能泄漏到正文中，否则无法检验图片解析与检索能力。
+    assert all(fact not in text for fact in ("LIME-482", "EAST-7", "BETA", "ARCHIVE"))
+    for case in cases:
+        for location in case.expected_source_location:
+            if "imageLocator" in location:
+                image_name = location["imageLocator"]
+                assert f"assets/{image_name}" in text
+                with Image.open(tmp_path / "assets" / image_name) as actual:
+                    assert actual.info["Author"] == "jf"
+                    assert actual.info["QA-Run-ID"] == "dataset-offline"
+                    with Image.open(data_root / "corpus" / "assets" / image_name) as expected:
+                        assert actual.size == expected.size
+                        assert actual.tobytes() == expected.tobytes()
+        # 这里验证标注自身一致性，不调用模型，也不代表模型回答正确。
+        sources = []
+        for location in case.expected_source_location:
+            metadata = {"originalFilename": corpus.expected_file_name, **location}
+            if "imageLocator" in metadata:
+                metadata["imageSourceLocator"] = metadata.pop("imageLocator")
+                metadata["ingestSource"] = "image_vision"
+            sources.append({"metadata": metadata})
+        metrics = evaluate_case(case, case.reference_answer, sources)
+        assert metrics["fact_coverage_rate"] == 1.0, case.case_id
+        assert metrics["forbidden_fact_hit_rate"] == 0.0, case.case_id
+        if metrics["recall_at_k"] is not None:
+            assert metrics["recall_at_k"] == 1.0, case.case_id
 
 
 def test_deterministic_metrics_use_answer_source_and_location() -> None:
@@ -163,7 +203,7 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(tmp_path: Path
         False,
         "localhost",
     )
-    assert len(results) == 15
+    assert len(results) == 20
     assert captured == results
     assert registry.expected[0].startswith("qa-rag-safe-run-")
     assert all(result.failure_reasons == ["RuntimeError"] for result in results)

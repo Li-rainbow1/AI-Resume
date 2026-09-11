@@ -3,7 +3,7 @@
 
 ## 当前状态
 
-- 脚本已实现：15 条 Golden Dataset、确定性指标、真实 RAG 执行器、DeepEval 四项指标、Bad Case 分类、JSONL/CSV/JSON 报告和 Allure 摘要。
+- 脚本已实现：20 条 Golden Dataset、确定性指标、真实 RAG 执行器、DeepEval 四项指标、Bad Case 分类、JSONL/CSV/JSON 报告和 Allure 摘要。
 - 单元验证已完成：数据集结构和确定性指标已有 pytest 覆盖。
 - 小规模真实模型基线尚未执行：当前隔离 Compose 的 Chat、Embedding、Vision 均指向 Mock AI；执行器会在上传前安全跳过。
 - 正式质量门禁尚未建立：需要固定真实模型、固定 Judge、完成多轮基线后再确定阈值。
@@ -28,7 +28,9 @@ Mock AI 仅服务接口契约、异常和性能测试，不生成 AI/RAG 质量�
 
 ## Golden Dataset
 
-版本控制文件为 `testdata/quality/golden_dataset.jsonl`，共 15 条脱敏固定样例：正文 4 条、图片 OCR 4 条、表格或流程图 2 条、正文图片混合 2 条、无答案 3 条。运行时资产由 `quality/assets.py` 在 pytest 临时目录生成，文件名带 `QA_RUN_ID` 和 UUID；内容只含虚构编号、流程和数值。
+版本控制文件为 `testdata/quality/golden_dataset.jsonl`，当前版本为 20 条合成固定样例：正文 6 条、图片 OCR 4 条、表格或流程图 4 条、正文图片混合 3 条、无答案 3 条。保留原 15 条并补充版本区分、边界条件、表格比较、流程顺序和三来源汇总。规模用于首轮小样本基线，不代表生产问题分布。
+
+素材与逐题依据见 [`testdata/quality/README.md`](../testdata/quality/README.md)。正文固定在 `testdata/quality/corpus/quality-corpus.md`；运行时资产由 `quality/assets.py` 读取该正文和已落盘的三张图片，图片像素保持一致，仅更新本轮标识，文档文件名带 `QA_RUN_ID` 和 UUID。正文不包含图片答案或标准答案，内容只含虚构编号、流程和数值。
 
 每条数据必须包含 `case_id`、`question`、`reference_answer`、`expected_document`、`expected_source_location`、`expected_facts`、`forbidden_facts`、`question_type`、`top_k`。加载器会检查字段、类型、唯一性和总条数。
 
@@ -36,15 +38,15 @@ Mock AI 仅服务接口契约、异常和性能测试，不生成 AI/RAG 质量�
 
 | 指标 | 输入 | 公式与方向 | 单条失败原因 | 汇总 |
 | --- | --- | --- | --- | --- |
-| Recall@K | 预期位置、TopK sources | 命中的预期位置数 / 预期位置数，越高越好 | TopK 未完整命中预期位置 | 逐条分数的算术平均 |
-| 来源命中率 | 预期文档、TopK sources | 命中预期文档的 source 数 / TopK source 数，越高越好 | sources 未命中预期文档 | 逐条分数的算术平均 |
-| 图片知识命中率 | 问题类型、位置、`ingestSource` | 图片类问题命中预期 `image_vision` Chunk 为 1，否则为 0，越高越好 | 图片 Chunk 未命中 | 逐条分数的算术平均 |
+| Recall@K | 预期位置、TopK sources | 命中的预期位置数 / 预期位置数，越高越好；无答案题不适用 | TopK 未完整命中预期位置 | 仅对适用题汇总，并记录评测条数 |
+| 来源命中率 | 预期文档、TopK sources | 命中预期文档的 source 数 / TopK source 数，越高越好；无答案题不适用 | sources 未命中预期文档 | 仅对适用题汇总，并记录评测条数 |
+| 图片知识命中率 | 问题类型、位置、`ingestSource` | 图片类问题命中预期 `image_vision` Chunk 为 1；正文题和无答案题不适用 | 图片 Chunk 未命中 | 仅对适用题汇总，并记录评测条数 |
 | 关键事实覆盖率 | answer、expected_facts | 回答命中的预期事实数 / 预期事实数，越高越好 | 生成遗漏事实或 OCR 内容缺失 | 逐条分数的算术平均 |
 | 禁止事实命中率 | answer、forbidden_facts | 回答命中的禁止事实数 / 禁止事实数，越低越好 | 回答包含禁止事实 | 逐条分数的算术平均 |
-| 无答案拒答率 | answer、sources | 含拒答表达且 sources 为空为 1，否则为 0，越高越好 | 无答案问题错误作答 | 逐条分数的算术平均 |
+| 无答案拒答率 | answer、forbidden_facts | 含拒答表达且未命中禁止事实为 1，否则为 0，越高越好；其他题不适用 | 无答案问题错误作答 | 仅对无答案题汇总，并记录评测条数 |
 | 重复运行稳定性 | 多次 answer、sources | 预期事实集合与文档 ID 集合两两 Jaccard 的平均值，越高越好 | 多次检索或回答事实不一致 | 逐条分数的算术平均 |
 
-HTTP 200 只表示请求成功。用例还会校验 answer、sources、预期文档、来源位置、关键事实、禁止事实以及重复运行结果。
+HTTP 200 只表示请求成功。用例还会校验 answer、sources、预期文档、来源位置、关键事实、禁止事实以及重复运行结果。不适用的指标写为 `null`，汇总不会把它们按 0 计入，并在 `summary.json` 的 `aggregate_evaluated_count` 记录实际评测条数。
 
 ## DeepEval
 

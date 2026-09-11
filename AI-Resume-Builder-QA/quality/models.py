@@ -23,7 +23,7 @@ class CaseResult:
     actual_answer: str
     reference_answer: str
     sources: list[dict[str, Any]]
-    deterministic_metrics: dict[str, float]
+    deterministic_metrics: dict[str, float | None]
     deepeval_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     passed: bool = False
     failure_reasons: list[str] = field(default_factory=list)
