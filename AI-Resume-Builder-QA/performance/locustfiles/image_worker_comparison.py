@@ -160,7 +160,7 @@ class ImageWorkerUser(QaPerformanceUser):
     def on_start(self) -> None:
         super().on_start()
         self._warmup_count = _int_setting("PERF_IMAGE_WARMUP_SAMPLES", 2)
-        self._measure_count = _int_setting("PERF_IMAGE_MEASURE_SAMPLES", 20)
+        self._measure_count = _int_setting("PERF_IMAGE_MEASURE_SAMPLES", 10)
         if self._measure_count <= 0:
             raise RuntimeError("图片解析正式样本数必须大于 0")
         self._target_count = self._warmup_count + self._measure_count

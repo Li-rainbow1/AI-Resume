@@ -66,7 +66,7 @@ def main() -> None:
         "PERF_RUN_IMAGE_WORKER": "0",
         "PERF_IMAGE_PORT_BASE": "19680",
         "PERF_IMAGE_WARMUP_SAMPLES": "2",
-        "PERF_IMAGE_MEASURE_SAMPLES": "20",
+        "PERF_IMAGE_MEASURE_SAMPLES": "10",
         "PERF_MODEL_MODE": "mock",
         "PERF_TASK_WAIT_MIN_SECONDS": "1",
         "PERF_TASK_WAIT_MAX_SECONDS": "2",

@@ -760,7 +760,7 @@ def main() -> int:
         help="逗号分隔的组别：legacy_serial、async_c3；省略时执行两组",
     )
     parser.add_argument("--warmup-samples", type=int, default=int(os.getenv("PERF_IMAGE_WARMUP_SAMPLES", "2")))
-    parser.add_argument("--measure-samples", type=int, default=int(os.getenv("PERF_IMAGE_MEASURE_SAMPLES", "20")))
+    parser.add_argument("--measure-samples", type=int, default=int(os.getenv("PERF_IMAGE_MEASURE_SAMPLES", "10")))
     parser.add_argument("--vision-delay-seconds", type=float, default=1.0)
     parser.add_argument("--embedding-delay-seconds", type=float, default=0.1)
     parser.add_argument("--model-mode", choices=("mock", "real"), default=None)
