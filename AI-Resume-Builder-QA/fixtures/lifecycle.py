@@ -1,4 +1,3 @@
-# author: jf
 from dataclasses import dataclass, field
 
 import httpx

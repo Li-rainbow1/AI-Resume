@@ -1,4 +1,3 @@
-<!-- author: jf -->
 # AI Resume Builder QA
 
 本目录用于存放 AI Resume Builder 的独立质量保障资产。被测源码位于相邻的 `AI-Resume-Builder` 目录，产品缺陷修复提交到被测源码仓库；测试计划、测试数据、自动化代码和测试报告保存在本目录。

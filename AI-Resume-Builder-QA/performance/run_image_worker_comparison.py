@@ -1,4 +1,3 @@
-# author: jf
 """图片解析旧版串行与异步三并发的隔离对比编排器。"""
 import argparse
 import csv
@@ -784,7 +783,6 @@ def main() -> int:
         raise SystemExit("报告目录已有内容，请使用新的运行 ID 或空目录")
     report_root.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, Any] = {
-        "author": "jf",
         "runId": args.run_id,
         "legacyTree": LEGACY_TREE,
         "currentCommit": None,

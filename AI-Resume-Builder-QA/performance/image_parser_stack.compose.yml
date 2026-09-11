@@ -1,4 +1,3 @@
-# author: jf
 # 图片解析性能对比专用隔离栈。由 run_image_worker_comparison.py 传入唯一项目名、端口和数据卷前缀。
 x-backend-environment: &backend-environment
   SERVER_PORT: "8999"

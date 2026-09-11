@@ -1,4 +1,3 @@
-# author: jf
 import asyncio
 import json
 import time

@@ -1,4 +1,3 @@
-# author: jf
 import asyncio
 import hashlib
 import json

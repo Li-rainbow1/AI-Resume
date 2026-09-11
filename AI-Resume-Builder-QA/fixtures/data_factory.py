@@ -1,4 +1,3 @@
-# author: jf
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -6,7 +5,7 @@ from uuid import uuid4
 import pytest
 from docx import Document
 from docx.shared import Inches
-from PIL import Image, ImageDraw, PngImagePlugin
+from PIL import Image, ImageDraw
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -52,15 +51,13 @@ class RagDataFactory:
         draw = ImageDraw.Draw(image)
         draw.rectangle((12, 12, 708, 228), outline="black", width=3)
         draw.text((40, 90), f"QA VISION SAMPLE {run_id[:12]}", fill="black")
-        metadata = PngImagePlugin.PngInfo()
-        metadata.add_text("Author", "jf")
-        image.save(path, format="PNG", pnginfo=metadata)
+        image.save(path, format="PNG")
         return path
 
     def _create_markdown(self, marker: str, vision_marker: str, image_path: Path) -> RagTestDocument:
         path = self._root / f"qa-rag-{self._run_id}-{marker.lower()}.md"
         path.write_text(
-            f"<!-- author: jf -->\n# QA 知识文档\n\n唯一标记：{marker}\n\n图片标记：{vision_marker}\n\n![QA 图片](assets/{image_path.name})\n",
+            f"# QA 知识文档\n\n唯一标记：{marker}\n\n图片标记：{vision_marker}\n\n![QA 图片](assets/{image_path.name})\n",
             encoding="utf-8",
         )
         return RagTestDocument(
@@ -78,7 +75,6 @@ class RagDataFactory:
     def _create_pdf(self, marker: str, vision_marker: str, image_path: Path) -> RagTestDocument:
         path = self._root / f"qa-rag-{self._run_id}-{marker.lower()}.pdf"
         pdf = canvas.Canvas(str(path), pagesize=A4)
-        pdf.setAuthor("jf")
         pdf.drawString(72, 780, f"QA marker: {marker}")
         pdf.drawString(72, 755, f"Vision marker: {vision_marker}")
         pdf.drawImage(ImageReader(str(image_path)), 72, 480, width=360, height=120)
@@ -94,7 +90,6 @@ class RagDataFactory:
     def _create_docx(self, marker: str, vision_marker: str, image_path: Path) -> RagTestDocument:
         path = self._root / f"qa-rag-{self._run_id}-{marker.lower()}.docx"
         document = Document()
-        document.core_properties.author = "jf"
         document.add_heading("QA 知识文档", level=1)
         document.add_paragraph(f"唯一标记：{marker}")
         document.add_paragraph(f"图片标记：{vision_marker}")

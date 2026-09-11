@@ -1,4 +1,3 @@
-# author: jf
 import json
 from pathlib import Path
 
@@ -43,7 +42,6 @@ def test_quality_materials_and_reference_answers_are_consistent(tmp_path: Path) 
                 image_name = location["imageLocator"]
                 assert f"assets/{image_name}" in text
                 with Image.open(tmp_path / "assets" / image_name) as actual:
-                    assert actual.info["Author"] == "jf"
                     assert actual.info["QA-Run-ID"] == "dataset-offline"
                     with Image.open(data_root / "corpus" / "assets" / image_name) as expected:
                         assert actual.size == expected.size

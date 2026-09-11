@@ -1,4 +1,3 @@
-# author: jf
 from typing import Any
 
 from quality.metrics import normalize_text, source_matches

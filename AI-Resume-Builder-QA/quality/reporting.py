@@ -1,4 +1,3 @@
-# author: jf
 import csv
 import json
 from dataclasses import asdict
@@ -31,7 +30,7 @@ def write_reports(
     summary_path = report_root / "summary.json"
     with jsonl_path.open("w", encoding="utf-8", newline="\n") as stream:
         for result in results:
-            payload = {"author": "jf", "run_id": run_id, "config_summary": config_summary, **asdict(result)}
+            payload = {"run_id": run_id, "config_summary": config_summary, **asdict(result)}
             stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
     metric_names = sorted({name for result in results for name in result.deterministic_metrics})
     judge_names = sorted({name for result in results for name in result.deepeval_metrics})
@@ -61,7 +60,6 @@ def write_reports(
         aggregate_evaluated_count[name] = len(values)
     deepeval_aggregate = {name: _aggregate_judge_metric(results, name) for name in judge_names}
     summary = {
-        "author": "jf",
         "run_id": run_id,
         "case_count": len(results),
         "passed_count": sum(result.passed for result in results),

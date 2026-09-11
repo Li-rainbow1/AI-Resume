@@ -1,4 +1,3 @@
-# author: jf
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 

@@ -1,4 +1,3 @@
-# author: jf
 import re
 from itertools import combinations
 from typing import Any

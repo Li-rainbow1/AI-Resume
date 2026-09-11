@@ -1,4 +1,3 @@
-# author: jf
 """为性能场景组装模型连接配置，并生成不含密钥的运行摘要。"""
 
 from typing import Mapping

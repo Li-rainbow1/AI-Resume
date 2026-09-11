@@ -1,4 +1,3 @@
-# author: jf
 from typing import Any
 
 from clients.rag import RagClient

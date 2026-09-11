@@ -1,4 +1,3 @@
-# author: jf
 """读取本地业务服务配置后，启动隔离的真实模型性能测试。"""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-# author: jf
 import allure
 import pytest
 from playwright.sync_api import Page

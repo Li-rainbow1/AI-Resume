@@ -1,4 +1,3 @@
-# author: jf
 import asyncio
 import os
 

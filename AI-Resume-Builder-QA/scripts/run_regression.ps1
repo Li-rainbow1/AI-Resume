@@ -1,4 +1,3 @@
-# author: jf
 [CmdletBinding()]
 param(
     [ValidateSet('image_worker_comparison')]
@@ -39,13 +38,13 @@ try {
         try {
             & $python scripts/verify_run_cleanup.py *> $null
             $cleanupCode = $LASTEXITCODE
-            @{ author = 'jf'; run_id = $runId; exit_code = 1; cleanup_exit_code = $cleanupCode; status = '运行器启动失败' } |
+            @{ run_id = $runId; exit_code = 1; cleanup_exit_code = $cleanupCode; status = '运行器启动失败' } |
                 ConvertTo-Json | Set-Content -LiteralPath (Join-Path $report 'summary.json') -Encoding UTF8
         } finally { Pop-Location }
         $code = 1
     }
     if (-not (Test-Path -LiteralPath (Join-Path $report 'summary.json'))) {
-        @{ author = 'jf'; run_id = $runId; exit_code = 1; status = '缺少运行时，清理校验无法执行' } |
+        @{ run_id = $runId; exit_code = 1; status = '缺少运行时，清理校验无法执行' } |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $report 'summary.json') -Encoding UTF8
     }
     $env:QA_RUN_ID = $oldRunId

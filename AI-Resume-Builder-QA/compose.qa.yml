@@ -1,4 +1,3 @@
-# author: jf
 name: ${QA_COMPOSE_NAME:-arb-qa}
 
 services:

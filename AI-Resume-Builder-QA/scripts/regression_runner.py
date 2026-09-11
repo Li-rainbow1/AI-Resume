@@ -1,4 +1,3 @@
-# author: jf
 """编排现有命令，所有业务创建和清理由既有 Fixture 负责。"""
 import argparse
 import asyncio
@@ -229,7 +228,7 @@ def main():
         except Exception:
             stages.append(dict(name='cleanup', exit_code=1, reason='清理校验未能完成'))
         code = next((s['exit_code'] for s in stages if s['exit_code']), 0)
-        summary = dict(author='jf', run_id=os.environ['QA_RUN_ID'], exit_code=code,
+        summary = dict(run_id=os.environ['QA_RUN_ID'], exit_code=code,
             performance=selected, quality=args.quality,
             seconds=round(time.monotonic()-started, 2), stages=stages, report_path=str(args.report),
             allure_report_path=str(args.report / 'allure-report' / 'index.html'))

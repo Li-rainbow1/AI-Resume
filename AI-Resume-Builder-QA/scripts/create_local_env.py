@@ -1,4 +1,3 @@
-# author: jf
 import argparse
 import base64
 import secrets
@@ -79,7 +78,7 @@ def main() -> None:
         "QA_QUALITY_REPEAT_COUNT": "2",
         "QA_RUN_DEEPEVAL": "0",
     }
-    content = "# author: jf\n# 本文件仅用于本机隔离 QA 环境，禁止提交。\n"
+    content = "# 本文件仅用于本机隔离 QA 环境，禁止提交。\n"
     content += "\n".join(f"{key}={value}" for key, value in values.items()) + "\n"
     target.write_text(content, encoding="utf-8")
     print(f"已生成本地隔离配置：{target}")

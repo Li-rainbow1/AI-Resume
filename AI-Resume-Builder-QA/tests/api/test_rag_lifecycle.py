@@ -1,4 +1,3 @@
-# author: jf
 from typing import Any
 
 import pytest

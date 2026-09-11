@@ -1,4 +1,3 @@
-# author: jf
 import hashlib
 import json
 from collections import Counter

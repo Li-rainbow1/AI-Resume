@@ -1,4 +1,3 @@
-# author: jf
 from pathlib import Path
 
 import allure

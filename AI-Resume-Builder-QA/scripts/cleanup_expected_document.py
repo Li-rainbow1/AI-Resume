@@ -1,4 +1,3 @@
-# author: jf
 import argparse
 import asyncio
 

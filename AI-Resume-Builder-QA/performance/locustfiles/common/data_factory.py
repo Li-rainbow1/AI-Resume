@@ -1,4 +1,3 @@
-# author: jf
 import json
 import hashlib
 import mimetypes
@@ -25,7 +24,6 @@ def write_image_pdf(path: Path, marker: str, image_paths: list[Path]) -> None:
     if "STSong-Light" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     pdf = canvas.Canvas(str(path), pagesize=A4, invariant=1)
-    pdf.setAuthor("jf")
     pdf.setTitle("图片解析多图性能样本")
     for index, image_path in enumerate(image_paths, start=1):
         pdf.setFont("STSong-Light", 17)
@@ -79,7 +77,7 @@ class PerformanceDataFactory:
         image_paths = [self._image(uid, index) for index in range(image_count or (1 if kind != "md" else 0))]
         if kind == "md":
             path = self.root / f"qa-rag-{self.run_id}-{uid}.md"
-            lines = ["<!-- author: jf -->", "# QA 性能测试知识文档", "", f"唯一标记：{marker}"]
+            lines = ["# QA 性能测试知识文档", "", f"唯一标记：{marker}"]
             for index, image_path in enumerate(image_paths, start=1):
                 lines.extend(["", f"图片 {index}", f"![QA 图片 {index}](assets/{image_path.name})"])
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -95,7 +93,6 @@ class PerformanceDataFactory:
         elif kind == "docx":
             path = self.root / f"qa-rag-{self.run_id}-{uid}.docx"
             doc = Document()
-            doc.core_properties.author = "jf"
             doc.add_heading("QA 性能测试知识文档", 1)
             doc.add_paragraph(f"唯一标记：{marker}")
             for index, image_path in enumerate(image_paths, start=1):

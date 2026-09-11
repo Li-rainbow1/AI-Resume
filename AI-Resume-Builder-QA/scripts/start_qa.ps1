@@ -1,5 +1,4 @@
-﻿# author: jf
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$Build,
     [ValidateRange(30, 300)]

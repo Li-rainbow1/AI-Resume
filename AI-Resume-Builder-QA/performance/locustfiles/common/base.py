@@ -1,4 +1,3 @@
-# author: jf
 from locust import HttpUser, between
 
 from performance.locustfiles.common.auth import encrypted_login

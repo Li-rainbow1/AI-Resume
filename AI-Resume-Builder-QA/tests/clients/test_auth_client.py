@@ -1,4 +1,3 @@
-# author: jf
 import base64
 from uuid import UUID, uuid4
 

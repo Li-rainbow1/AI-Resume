@@ -1,4 +1,3 @@
-# author: jf
 """管理 Locust 采样结束及 CSV 写协程的退出顺序。"""
 
 import gevent

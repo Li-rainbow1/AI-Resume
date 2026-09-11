@@ -1,4 +1,3 @@
-# author: jf
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -100,6 +99,5 @@ class QualityAssetFactory:
 
     def _save(self, image: Image.Image, path: Path) -> None:
         metadata = PngImagePlugin.PngInfo()
-        metadata.add_text("Author", "jf")
         metadata.add_text("QA-Run-ID", self.run_id)
         image.save(path, format="PNG", pnginfo=metadata)

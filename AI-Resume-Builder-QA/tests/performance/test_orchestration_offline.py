@@ -1,4 +1,3 @@
-# author: jf
 """仅用本地替身验证编排，无 Docker 写入、上传或真实模型请求。"""
 import json
 import os

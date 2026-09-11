@@ -1,4 +1,3 @@
-# author: jf
 """仅在本地制作固定性能素材，不启动服务、不上传、不调用模型。"""
 
 import hashlib
@@ -99,7 +98,7 @@ def main() -> None:
     pdf_path = root / "five-images.pdf"
     write_image_pdf(pdf_path, "QA_PERF_real_source_preview", [root / entry["path"] for entry in entries])
     manifest = {
-        "author": "jf", "version": "performance-image-real-v2-five-pages", "imageCount": IMAGE_COUNT, "pageCount": IMAGE_COUNT,
+        "version": "performance-image-real-v2-five-pages", "imageCount": IMAGE_COUNT, "pageCount": IMAGE_COUNT,
         "sourcePdf": previous["sourcePdf"] if previous else {
             "fileName": source_pdf.name,
             "sha256": hashlib.sha256(source_pdf.read_bytes()).hexdigest(),
