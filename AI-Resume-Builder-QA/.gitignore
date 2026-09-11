@@ -25,3 +25,7 @@ test-results/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 性能素材的旧产物与未被 manifest 引用的中间图：留在本地便于重生成，但不入库
+testdata/performance/image_parser/six-images.pdf
+testdata/performance/image_parser/assets/source-page-09-image-02.ppm

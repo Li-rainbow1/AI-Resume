@@ -1,10 +1,10 @@
 # author: jf
-name: arb-qa
+name: ${QA_COMPOSE_NAME:-arb-qa}
 
 services:
   mock-ai:
-    image: ai-resume-builder-python-ai-backend:latest
-    container_name: arb-qa-mock-ai
+    image: ${QA_MOCK_AI_IMAGE:-ai-resume-builder-python-ai-backend:latest}
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-mock-ai
     working_dir: /qa
     command: ["uvicorn", "mock_server.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
@@ -31,7 +31,7 @@ services:
 
   mysql:
     image: mysql:8.4
-    container_name: arb-qa-mysql
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-mysql
     environment:
       MYSQL_DATABASE: "${QA_MYSQL_DATABASE}"
       MYSQL_ROOT_PASSWORD: "${QA_MYSQL_ROOT_PASSWORD}"
@@ -50,7 +50,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: arb-qa-redis
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -61,7 +61,7 @@ services:
 
   pgvector:
     image: pgvector/pgvector:pg17
-    container_name: arb-qa-pgvector
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-pgvector
     environment:
       POSTGRES_DB: "${QA_POSTGRES_DB}"
       POSTGRES_USER: "${QA_POSTGRES_USER}"
@@ -81,7 +81,7 @@ services:
 
   minio:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
-    container_name: arb-qa-minio
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-minio
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: "${QA_MINIO_ROOT_USER}"
@@ -102,7 +102,7 @@ services:
 
   minio-init:
     image: minio/mc:RELEASE.2024-11-21T17-21-54Z
-    container_name: arb-qa-minio-init
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -130,7 +130,7 @@ services:
 
   flyway-mysql:
     image: resume-builder-flyway:13.3.0-mysql-26.7.0
-    container_name: arb-qa-flyway-mysql
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-flyway-mysql
     depends_on:
       mysql:
         condition: service_healthy
@@ -146,14 +146,14 @@ services:
       FLYWAY_CLEAN_DISABLED: "true"
       FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
     volumes:
-      - ../AI-Resume-Builder/sql/migrations/mysql:/flyway/sql:ro
+      - "${QA_MIGRATIONS_ROOT:-../AI-Resume-Builder}/sql/migrations/mysql:/flyway/sql:ro"
     command: ["migrate"]
     networks:
       - qa-network
 
   flyway-pgvector:
     image: resume-builder-flyway:13.3.0-mysql-26.7.0
-    container_name: arb-qa-flyway-pgvector
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-flyway-pgvector
     depends_on:
       pgvector:
         condition: service_healthy
@@ -169,14 +169,14 @@ services:
       FLYWAY_CLEAN_DISABLED: "true"
       FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
     volumes:
-      - ../AI-Resume-Builder/sql/migrations/postgresql:/flyway/sql:ro
+      - "${QA_MIGRATIONS_ROOT:-../AI-Resume-Builder}/sql/migrations/postgresql:/flyway/sql:ro"
     command: ["migrate"]
     networks:
       - qa-network
 
   qa-user-seed:
     image: mysql:8.4
-    container_name: arb-qa-user-seed
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-user-seed
     depends_on:
       flyway-mysql:
         condition: service_completed_successfully
@@ -205,8 +205,8 @@ services:
       - qa-network
 
   backend:
-    image: ai-resume-builder-python-ai-backend:latest
-    container_name: arb-qa-backend
+    image: ${QA_BACKEND_IMAGE:-ai-resume-builder-python-ai-backend:latest}
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-backend
     depends_on:
       mock-ai:
         condition: service_healthy
@@ -231,25 +231,26 @@ services:
       PGVECTOR_DATASOURCE_URL: "postgresql+psycopg://${QA_POSTGRES_USER}:${QA_POSTGRES_PASSWORD}@pgvector:5432/${QA_POSTGRES_DB}"
       PGVECTOR_DATASOURCE_USERNAME: "${QA_POSTGRES_USER}"
       PGVECTOR_DATASOURCE_PASSWORD: "${QA_POSTGRES_PASSWORD}"
-      OPENAI_BASE_URL: http://mock-ai:8000
-      OPENAI_API_KEY: "${QA_MOCK_API_KEY}"
-      OPENAI_CHAT_BASE_URL: http://mock-ai:8000
-      OPENAI_CHAT_API_KEY: "${QA_MOCK_API_KEY}"
-      OPENAI_CHAT_COMPLETIONS_PATH: /v1/chat/completions
-      OPENAI_CHAT_MODEL: mock-chat
+      OPENAI_BASE_URL: "${PERF_OPENAI_BASE_URL:-http://mock-ai:8000}"
+      OPENAI_API_KEY: "${PERF_OPENAI_API_KEY:-qa-mock-key}"
+      OPENAI_CHAT_BASE_URL: "${PERF_OPENAI_CHAT_BASE_URL:-http://mock-ai:8000}"
+      OPENAI_CHAT_API_KEY: "${PERF_OPENAI_CHAT_API_KEY:-qa-mock-key}"
+      OPENAI_CHAT_COMPLETIONS_PATH: "${PERF_OPENAI_CHAT_COMPLETIONS_PATH:-/v1/chat/completions}"
+      OPENAI_CHAT_MODEL: "${PERF_OPENAI_CHAT_MODEL:-mock-chat}"
+      OPENAI_CHAT_TIMEOUT_SECONDS: "${PERF_OPENAI_CHAT_TIMEOUT_SECONDS:-25}"
       APP_INTERVIEW_CONTEXT_SOFT_CHARS: "${APP_INTERVIEW_CONTEXT_SOFT_CHARS:-24000}"
       APP_INTERVIEW_CONTEXT_HARD_CHARS: "${APP_INTERVIEW_CONTEXT_HARD_CHARS:-32000}"
       APP_INTERVIEW_SUMMARY_CHARS: "${APP_INTERVIEW_SUMMARY_CHARS:-3000}"
-      EMBEDDING_PROVIDER: openai
-      OPENAI_EMBEDDING_BASE_URL: http://mock-ai:8000/v1
-      OPENAI_EMBEDDING_API_KEY: "${QA_MOCK_API_KEY}"
-      OPENAI_EMBEDDING_MODEL: text-embedding-3-large
-      OPENAI_EMBEDDING_TIMEOUT_SECONDS: "10"
-      VISION_PROVIDER: openai
-      OPENAI_VISION_BASE_URL: http://mock-ai:8000
-      OPENAI_VISION_API_KEY: "${QA_MOCK_API_KEY}"
-      OPENAI_VISION_MODEL: mock-vision
-      OPENAI_VISION_TIMEOUT_SECONDS: "10"
+      EMBEDDING_PROVIDER: "${PERF_EMBEDDING_PROVIDER:-openai}"
+      OPENAI_EMBEDDING_BASE_URL: "${PERF_OPENAI_EMBEDDING_BASE_URL:-http://mock-ai:8000/v1}"
+      OPENAI_EMBEDDING_API_KEY: "${PERF_OPENAI_EMBEDDING_API_KEY:-qa-mock-key}"
+      OPENAI_EMBEDDING_MODEL: "${PERF_OPENAI_EMBEDDING_MODEL:-text-embedding-3-large}"
+      OPENAI_EMBEDDING_TIMEOUT_SECONDS: "${PERF_OPENAI_EMBEDDING_TIMEOUT_SECONDS:-10}"
+      VISION_PROVIDER: "${PERF_VISION_PROVIDER:-openai}"
+      OPENAI_VISION_BASE_URL: "${PERF_OPENAI_VISION_BASE_URL:-http://mock-ai:8000}"
+      OPENAI_VISION_API_KEY: "${PERF_OPENAI_VISION_API_KEY:-qa-mock-key}"
+      OPENAI_VISION_MODEL: "${PERF_OPENAI_VISION_MODEL:-mock-vision}"
+      OPENAI_VISION_TIMEOUT_SECONDS: "${PERF_OPENAI_VISION_TIMEOUT_SECONDS:-10}"
       RAG_OBJECT_STORAGE_ENDPOINT: http://minio:9000
       RAG_OBJECT_STORAGE_BUCKET: qa-rag-documents
       RAG_OBJECT_STORAGE_ACCESS_KEY: "${QA_MINIO_APP_ACCESS_KEY}"
@@ -272,7 +273,7 @@ services:
 
   frontend:
     image: arb-qa-frontend:local
-    container_name: arb-qa-frontend
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-frontend
     build:
       context: ../AI-Resume-Builder
       dockerfile: Dockerfile
@@ -292,8 +293,8 @@ services:
       - qa-network
 
   image-worker:
-    image: ai-resume-builder-python-ai-backend:latest
-    container_name: arb-qa-image-worker
+    image: ${QA_BACKEND_IMAGE:-ai-resume-builder-python-ai-backend:latest}
+    container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-image-worker
     command: ["python", "-m", "app.worker_main"]
     healthcheck:
       disable: true
@@ -310,16 +311,16 @@ services:
       PGVECTOR_DATASOURCE_URL: "postgresql+psycopg://${QA_POSTGRES_USER}:${QA_POSTGRES_PASSWORD}@pgvector:5432/${QA_POSTGRES_DB}"
       PGVECTOR_DATASOURCE_USERNAME: "${QA_POSTGRES_USER}"
       PGVECTOR_DATASOURCE_PASSWORD: "${QA_POSTGRES_PASSWORD}"
-      EMBEDDING_PROVIDER: openai
-      OPENAI_EMBEDDING_BASE_URL: http://mock-ai:8000/v1
-      OPENAI_EMBEDDING_API_KEY: "${QA_MOCK_API_KEY}"
-      OPENAI_EMBEDDING_MODEL: text-embedding-3-large
-      OPENAI_EMBEDDING_TIMEOUT_SECONDS: "10"
-      VISION_PROVIDER: openai
-      OPENAI_VISION_BASE_URL: http://mock-ai:8000
-      OPENAI_VISION_API_KEY: "${QA_MOCK_API_KEY}"
-      OPENAI_VISION_MODEL: mock-vision
-      OPENAI_VISION_TIMEOUT_SECONDS: "10"
+      EMBEDDING_PROVIDER: "${PERF_EMBEDDING_PROVIDER:-openai}"
+      OPENAI_EMBEDDING_BASE_URL: "${PERF_OPENAI_EMBEDDING_BASE_URL:-http://mock-ai:8000/v1}"
+      OPENAI_EMBEDDING_API_KEY: "${PERF_OPENAI_EMBEDDING_API_KEY:-qa-mock-key}"
+      OPENAI_EMBEDDING_MODEL: "${PERF_OPENAI_EMBEDDING_MODEL:-text-embedding-3-large}"
+      OPENAI_EMBEDDING_TIMEOUT_SECONDS: "${PERF_OPENAI_EMBEDDING_TIMEOUT_SECONDS:-10}"
+      VISION_PROVIDER: "${PERF_VISION_PROVIDER:-openai}"
+      OPENAI_VISION_BASE_URL: "${PERF_OPENAI_VISION_BASE_URL:-http://mock-ai:8000}"
+      OPENAI_VISION_API_KEY: "${PERF_OPENAI_VISION_API_KEY:-qa-mock-key}"
+      OPENAI_VISION_MODEL: "${PERF_OPENAI_VISION_MODEL:-mock-vision}"
+      OPENAI_VISION_TIMEOUT_SECONDS: "${PERF_OPENAI_VISION_TIMEOUT_SECONDS:-10}"
       RAG_OBJECT_STORAGE_ENDPOINT: http://minio:9000
       RAG_OBJECT_STORAGE_BUCKET: qa-rag-documents
       RAG_OBJECT_STORAGE_ACCESS_KEY: "${QA_MINIO_APP_ACCESS_KEY}"
@@ -333,12 +334,12 @@ services:
 
 networks:
   qa-network:
-    name: arb-qa-network
+    name: ${QA_NETWORK_NAME:-arb-qa-network}
 
 volumes:
   qa-mysql-data:
-    name: arb-qa-mysql-data
+    name: ${QA_VOLUME_PREFIX:-arb-qa}-mysql-data
   qa-pgvector-data:
-    name: arb-qa-pgvector-data
+    name: ${QA_VOLUME_PREFIX:-arb-qa}-pgvector-data
   qa-minio-data:
-    name: arb-qa-minio-data
+    name: ${QA_VOLUME_PREFIX:-arb-qa}-minio-data

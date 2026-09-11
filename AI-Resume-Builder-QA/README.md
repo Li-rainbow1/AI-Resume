@@ -32,12 +32,11 @@ tests/api/            RAG 主链接口自动化
 tests/mock/           Mock AI 契约测试
 tests/interview/      AI 面试上下文、压缩与流式完整性边界
 tests/ui/             Markdown 图片预览 Playwright 场景
-                      AI 面试断流、连续失败与成功重试场景
 pages/                登录、知识库与 Markdown 预览 Page Object
 testdata/             测试数据生成规则
 mock_server/          OpenAI-compatible Mock AI
 reports/              JUnit、临时数据与运行产物
-performance/          图片解析与 AI 面试 SSE 性能编排、公共组件和报告说明
+performance/          图片解析性能编排、公共组件和报告说明
 quality/              Golden Dataset 加载、确定性指标、DeepEval、Bad Case 与报告
 tests/quality/        指标单元验证和真实 RAG 质量基线入口
 ```
@@ -110,7 +109,7 @@ $env:QA_RUN_UI = '1'
 
 UI 用例上传前登记带 `QA_RUN_ID` 的完整文件名。正常删除、断言失败或 pytest 中断退出时，清理 Fixture 都会再次分页查询并仅删除完全匹配的本轮文档。本地生成的 Markdown 和图片只位于 pytest 临时目录，不会删除源文件。
 
-当前两项性能场景的门禁、报告、图片解析三组对比和 SSE 分级负载方式见 [`performance/README.md`](performance/README.md)。运行产物位于 `reports/` 且不会进入 Git。
+当前性能场景的门禁、报告与图片解析两组对比方式见 [`performance/README.md`](performance/README.md)。图片解析组别可以单独运行，避免重复执行已完成的旧版基线。运行产物位于 `reports/` 且不会进入 Git。
 
 AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置和报告结构见 [`quality/README.md`](quality/README.md)。当前隔离 Compose 使用 Mock AI，真实质量用例会在上传前安全跳过，不会生成虚假的质量基线。
 
@@ -127,19 +126,19 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 - 2026-09-09 增量验证：上下文完整性用例并入一键入口后，API/Mock `24 passed`、UI `1 passed`、清理校验通过；覆盖富文本简历提取、超阈值摘要、摘要失败回滚、严格流式结束和请求幂等。
 - 2026-09-09 隔离接口冒烟：AI 面试首轮实际收到 `accepted/processing/chunk/done`，相同 `requestId` 重试只恢复缓存结果；临时面试会话已按精确 ID 清理。
 - 已执行：Chromium 下 Markdown 图片附件上传、图片解析、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
-- 历史范围：五项 Locust 脚本曾完成小流量冒烟；当前性能范围收敛为图片解析串行/并发对比和 AI 面试 SSE 流式性能。正式性能基线、容量结论和优化结论均未执行。
-- 已实现：15 条 Golden Dataset、七项确定性指标、DeepEval 四项指标、Bad Case 分类和质量报告；指标单元验证已执行。
+- 历史范围：五项 Locust 脚本曾完成小流量冒烟；当前性能范围收敛为图片解析串行/并发对比，AI 面试 SSE 流式性能已从当前范围移除。正式性能基线、容量结论和优化结论均未执行。
+- 已实现：20 条 Golden Dataset、七项确定性指标、DeepEval 四项指标、Bad Case 分类和质量报告；数据集素材与逐题依据见 `testdata/quality/README.md`，真实模型质量基线尚未执行。
 - 未执行：真实 Chat、Embedding、Vision/OCR 与固定 Judge 的小规模质量基线；当前 Mock AI 隔离环境不满足真实性门禁。
 - 本轮未做：正式 AI/RAG 质量门禁和远端推送；本地一键回归状态见下文。
 - 未完成内容不得提前写成简历成果。
 
 ## 本地一键回归
 
-2026-09-09 复审修复后：默认 API/Mock **26 passed**、UI **2 passed**，清理通过。运行报告为 `reports/regression/reg-d5255f40af3c4ba1807b9787/summary.json`。UI 新增 AI 面试缺少 done、连续失败及恢复成功的草稿替换验证，浏览器拦截模拟面试响应，不调用真实模型。
+2026-09-09 历史回归：默认 API/Mock **26 passed**、UI **2 passed**，清理通过。运行报告为 `reports/regression/reg-d5255f40af3c4ba1807b9787/summary.json`。其中 AI 面试流式异常用例已后续移出 UI 回归，当前 UI 回归只保留 Markdown 图片预览场景；AI 面试边界保留在接口级测试中。
 
 ```powershell
 .\scripts\run_regression.ps1
-.\scripts\run_regression.ps1 -Performance image_worker_comparison,interview_sse
+.\scripts\run_regression.ps1 -Performance image_worker_comparison
 .\scripts\run_regression.ps1 -Quality
 ```
 
@@ -147,11 +146,13 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 
 默认依次执行健康检查、`tests/api`、`tests/mock`、`tests/clients`、`tests/interview`、Markdown 图片预览 UI 回归和现有清理校验。UI 强制启用；pytest 零用例、任一 skip、失败或报告缺失均返回非零。默认覆盖进程中继承的性能和质量开关为关闭；接口及 UI 的合成文档写入只在核验 Mock AI 的隔离 QA 环境执行。不会调用真实 Chat、Embedding、Vision/OCR 或 Judge。
 
-`-Performance image_worker_comparison,interview_sse` 在默认 Mock 回归后追加指定场景。可选值仅为 `image_worker_comparison`、`interview_sse`；入口仅启用对应 `PERF_RUN_*`，忽略环境中其他场景开关，不修改对应 `PERF_ALLOW_*` 写入授权。图片解析场景会在三个专属隔离 Compose 组中依次比较旧同步串行、新异步并发 1 和新异步并发 3；SSE 场景按 1、5、10 用户分别预热和测量。命令、Mock 口径和报告结构见性能说明。
+`-Performance image_worker_comparison` 在默认 Mock 回归后追加指定场景。可选值仅为 `image_worker_comparison`；入口仅启用对应 `PERF_RUN_*`，忽略环境中其他场景开关，不修改对应 `PERF_ALLOW_*` 写入授权。图片解析场景默认比较旧同步串行和新异步并发 3，也可以用 `-ImageVariant async_c3` 单独执行新版组。命令、Mock 口径和报告结构见性能说明。
 
 `-Quality` 只执行真实模型健康门禁、质量评测及清理校验，不运行 API/UI，也不检查前端或启动 Chromium。Mock 配置在健康门禁即被拒绝。真实评测要求提前提供 `QA_RUN_RAG_QUALITY`、`QA_ALLOW_QUALITY_WRITES`、`QA_QUALITY_REAL_MODELS_CONFIRMED`、RAG 集成写入门禁、`QA_RUN_DEEPEVAL` 和三个 Judge 环境变量，并安装 `.[test,eval]`。入口不会自动授权质量写入或切换模型。两个可选参数不能同时使用，旧 `-WithPerformance`、`-WithQuality` 参数已移除。
 
-每次生成唯一 `QA_RUN_ID`，原终端变量在退出时恢复。输出目录为 `reports/regression/<QA_RUN_ID>/`，含 `summary.json`、各阶段日志、JUnit XML、pytest HTML、Allure Results 和 UI 失败截图。可选性能 CSV/HTML 同样放在本轮目录；质量逐条报告沿用 `reports/quality/<QA_RUN_ID>/`。所有产物均由现有 Git 忽略规则覆盖。
+每次生成唯一 `QA_RUN_ID`，原终端变量在退出时恢复。输出目录为 `reports/regression/<QA_RUN_ID>/`，其中 `allure-report/index.html` 为主要测试报告入口，报告界面使用中文并生成单文件报告，可直接双击打开；同时保留 `summary.json`、各阶段日志、JUnit XML、pytest HTML、Allure Results。两个通过的 UI 场景会附带关键页面截图，失败时仍由 Playwright 额外保留失败截图。可选性能 CSV/HTML 同样放在本轮目录；质量逐条报告沿用 `reports/quality/<QA_RUN_ID>/`。所有产物均由现有 Git 忽略规则覆盖。
+
+一键回归生成 Allure HTML 报告需要本机已安装 Allure CLI 并加入 `PATH`，同时要求可用的 Java 运行时。报告工具缺失、生成失败或缺少 `index.html` 均会使本轮回归返回非零；接口、UI 和 AI 质量用例失败时仍会尝试生成报告，方便查看失败详情。
 
 无论阶段成功或失败，都执行 `scripts/verify_run_cleanup.py`。业务清理由既有 Fixture/Locust 注册表执行；入口不增加删除逻辑。清理校验仅统计本轮前缀残留，非零残留或校验无法完成都会使整轮失败。进程被强制终止、主机断电时无法保证 finally 执行，应保留运行 ID 并人工核验。
 
