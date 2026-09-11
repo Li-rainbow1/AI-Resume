@@ -20,7 +20,7 @@
 
 编排器默认执行两组相互隔离的环境，也支持通过参数单独运行任意一组：
 
-1. `legacy_serial`：从 Git tree `5901d9ac0f4ec21f2d72f4dd40b4da1c8638c3d2` 提取旧版代码，构建独立镜像，运行旧同步串行链路。
+1. `legacy_serial`：从 Git tree `253428dc2e206a162186c369e8c205cda7213a80` 提取旧版代码，构建独立镜像，运行旧同步串行链路。该 tree 基于旧版快照 `5901d9ac0f4ec21f2d72f4dd40b4da1c8638c3d2`，仅补入视觉解析的传输层重试与内容级重试修复，用于排除与「同步串行 / 异步并发」对比维度无关的偶发解析失败。
 2. `async_c3`：提取业务仓库当前 HEAD 的完整快照及迁移，构建独立镜像并固定镜像 ID，异步图片解析 Worker 并发为 3。工作区未提交内容不进入该基线。
 
 旧 tree、旧版构建上下文或旧版迁移缺失时，脚本直接失败。两组各自使用独立 Compose 项目、网络、后端端口和数据卷，结束后只销毁自己的资源；选择单组时不会启动另一组。
@@ -32,7 +32,7 @@
 - 上传请求完成耗时：从发起上传到上传流读完，并确认收到 `batch-complete`。
 - 图片解析总耗时：旧版以同步上传完成为终点，新版以状态接口观察到完成为终点；数据库校验在采样后执行，不计入上述耗时。
 
-异步组通过状态轮询观察终态。轮询间隔只会带来观测误差，报告不会将它称为精确队列等待时间。编排器会按实际文档 ID 查询 PostgreSQL，确认每篇文档有 6 条已入库图片记录、0 条失败记录、至少 6 个图片 Chunk，且没有重复图片 Chunk；失败样本保留在 `samples.jsonl`，不会从均值、中位数、P95 或失败率中静默排除。
+异步组通过状态轮询观察终态。轮询间隔只会带来观测误差，报告不会将它称为精确队列等待时间。编排器会按实际文档 ID 查询 PostgreSQL，确认每篇文档的 5 张候选图全部落到终态：`extractionCount = 5`、`indexedCount + skippedCount = 5`、0 条失败记录、图片 Chunk 数不少于 `indexedCount`，且没有重复图片 Chunk。后端把视觉分类为 `decorative` / `empty` 的图片视为**合法成功终态**（写入 `skipped`、不建分片、文档仍为 `completed`），因此核验口径不要求每张图都必须产出分片；被跳过的张数会写入组别汇总的 `databaseValidation.skippedImages`，用于区分「合法跳过」与「静默少图」。失败样本保留在 `samples.jsonl`，不会从均值、中位数、P95 或失败率中静默排除。
 
 ```powershell
 $env:PYTHONUTF8 = '1'
@@ -60,6 +60,7 @@ $env:PERF_ALLOW_RAG_WRITES = '1'
 
 ## 本轮检查记录
 
+- 2026-09-11 校验口径校正：`formal-ab-20260911z` 中 `legacy_serial` 通过，`async_c3` 因单篇文档 `indexedCount=4` 判失败，但该文档 `status=completed`、`failedCount=0`——即一张图被判为 `decorative`/`empty` 后按设计跳过。该行为在产品侧已验收通过（`docs/步骤三-人工验证清单.md`：空白页面分类为 `empty`、跳过 1、图片 Chunk 0、正文保持 `ready`；真实 PDF/DOCX 增强也各有 1 张按分类跳过），故核验口径过严而非业务回归。现改为按「候选全部落终态」判定，并把跳过张数落盘；`python -m pytest tests/performance -q -o addopts=''` 为 13 passed。
 - 2026-09-10 脚本修复复验：`python -m pytest tests/performance -q -o addopts=''` 为 19 passed。覆盖五图素材一致性与大小、Locust 独立协程退出和 CSV 关闭顺序、失败日志与汇总保留、追加采样独立目录、启动失败清理、健康等待、隔离地址和迁移目录、返回回复与保存回复一致性。Python 编译与 `git diff --check` 通过。五页 PDF 已渲染查看；本次未构建镜像、未发起压测、未调用真实模型，容器运行与真实数据库行为待后续验证。
 - 以下为历史阶段检查记录，不作为本次运行结果：
 - Python 语法、PowerShell 参数语法、QA 及新旧图片栈 Compose 配置解析通过；作者标记、已配置凭据扫描与 `git diff --check` 通过。

@@ -28,11 +28,19 @@ def test_command_nonzero_keeps_log_and_can_be_summarized(tmp_path):
         image_runner._run([sys.executable, "-c", "raise SystemExit(1)"], dict(os.environ))
 
 
-def test_database_requires_five_images():
-    row = dict(status="completed", extractionCount=5, indexedCount=5, failedCount=0, imageChunkCount=5, duplicateChunkCount=0)
+def test_database_accounts_for_all_five_candidates():
+    row = dict(status="completed", extractionCount=5, indexedCount=5, skippedCount=0, failedCount=0, imageChunkCount=5, duplicateChunkCount=0)
     image_runner._validate_database_rows({"doc": row}, ["doc"])
+    # 后端把 decorative/empty 图片视为合法成功终态：4 张入库 + 1 张跳过应通过。
+    image_runner._validate_database_rows(
+        {"doc": {**row, "indexedCount": 4, "skippedCount": 1, "imageChunkCount": 4}}, ["doc"]
+    )
+    # 无跳过却少一张入库，说明存在非终态残留，仍须失败。
     with pytest.raises(RuntimeError):
         image_runner._validate_database_rows({"doc": {**row, "indexedCount": 4}}, ["doc"])
+    # 入库与跳过合计超过候选数，说明计数异常。
+    with pytest.raises(RuntimeError):
+        image_runner._validate_database_rows({"doc": {**row, "skippedCount": 1}}, ["doc"])
     with pytest.raises(RuntimeError):
         image_runner._validate_database_rows({"doc": {**row, "duplicateChunkCount": 1}}, ["doc"])
 

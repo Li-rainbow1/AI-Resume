@@ -26,7 +26,8 @@ from performance.locustfiles.common.data_factory import IMAGE_COUNT, Performance
 ROOT = Path(__file__).resolve().parents[1]
 BUSINESS_ROOT = ROOT.parent / "AI-Resume-Builder"
 COMPOSE_FILE = ROOT / "performance" / "image_parser_stack.compose.yml"
-LEGACY_TREE = "5901d9ac0f4ec21f2d72f4dd40b4da1c8638c3d2"
+# legacy 基线 tree：旧版快照 5901d9ac 补入视觉解析重试修复后的快照，取舍原因见 performance/README.md。
+LEGACY_TREE = "253428dc2e206a162186c369e8c205cda7213a80"
 VARIANTS = (
     ("legacy_serial", "legacy", 0, False),
     ("async_c3", "current", 3, True),
@@ -300,6 +301,7 @@ WITH extraction_counts AS (
            COUNT(DISTINCT e.extraction_id) AS extraction_count,
            COUNT(DISTINCT e.extraction_id) FILTER (WHERE e.status = 'indexed') AS indexed_count,
            COUNT(DISTINCT e.extraction_id) FILTER (WHERE e.status = 'failed') AS failed_count,
+           COUNT(DISTINCT e.extraction_id) FILTER (WHERE e.status = 'skipped') AS skipped_count,
            COUNT(c.id) AS image_chunk_count,
            COALESCE(STRING_AGG(DISTINCT NULLIF(e.error_message, ''), ' || '), '') AS error_message
     FROM rag_document_image_extractions e
@@ -320,6 +322,7 @@ SELECT d.document_id,
        COALESCE(d.image_enrichment_status, ''),
        COALESCE(x.extraction_count, 0),
        COALESCE(x.indexed_count, 0),
+       COALESCE(x.skipped_count, 0),
        COALESCE(x.failed_count, 0),
        COALESCE(x.image_chunk_count, 0),
        COALESCE(SUM(q.duplicate_count), 0),
@@ -328,7 +331,7 @@ FROM rag_documents d
 LEFT JOIN extraction_counts x ON x.document_id = d.document_id
 LEFT JOIN duplicate_chunks q ON q.document_id = d.document_id
 WHERE d.document_id IN ({literal_ids})
-GROUP BY d.document_id, d.image_enrichment_status, x.extraction_count, x.indexed_count, x.failed_count, x.image_chunk_count, x.error_message
+GROUP BY d.document_id, d.image_enrichment_status, x.extraction_count, x.indexed_count, x.skipped_count, x.failed_count, x.image_chunk_count, x.error_message
 ORDER BY d.document_id;
 """
     result = _run(
@@ -347,14 +350,26 @@ ORDER BY d.document_id;
     )
     rows: dict[str, dict[str, int | str]] = {}
     for line in result.stdout.splitlines():
-        values = line.strip().split("|")
-        if len(values) != 8:
+        # error_message 由 SQL 用「 || 」拼接，本身可能含竖线，故限制切分次数以保住末尾整段。
+        values = line.strip().split("|", 8)
+        if len(values) != 9:
             continue
-        document_id, status, extraction_count, indexed_count, failed_count, chunk_count, duplicate_count, error_message = values
+        (
+            document_id,
+            status,
+            extraction_count,
+            indexed_count,
+            skipped_count,
+            failed_count,
+            chunk_count,
+            duplicate_count,
+            error_message,
+        ) = values
         rows[document_id] = {
             "status": status,
             "extractionCount": int(extraction_count),
             "indexedCount": int(indexed_count),
+            "skippedCount": int(skipped_count),
             "failedCount": int(failed_count),
             "imageChunkCount": int(chunk_count),
             "duplicateChunkCount": int(duplicate_count),
@@ -364,16 +379,24 @@ ORDER BY d.document_id;
 
 
 def _validate_database_rows(rows: dict[str, dict[str, int | str]], document_ids: list[str]) -> None:
+    """按后端契约校验入库结果。
+
+    后端把 classification 为 decorative/empty 的图片视为**合法成功终态**（写入 skipped、
+    不建分片、文档仍为 completed），因此这里要求「已入库 + 已跳过」覆盖全部候选图，
+    而不是要求每张图都必须产出分片。
+    """
     for document_id in document_ids:
         row = rows.get(document_id)
         if not row:
             raise RuntimeError(f"数据库缺少本次图片解析文档：{document_id}")
+        indexed_count = int(row["indexedCount"])
+        skipped_count = int(row["skippedCount"])
         if (
             row["status"] != "completed"
             or row["extractionCount"] != IMAGE_COUNT
-            or row["indexedCount"] != IMAGE_COUNT
+            or indexed_count + skipped_count != IMAGE_COUNT
             or row["failedCount"] != 0
-            or row["imageChunkCount"] < IMAGE_COUNT
+            or row["imageChunkCount"] < indexed_count
             or row["duplicateChunkCount"] != 0
         ):
             raise RuntimeError(f"图片解析数据库校验失败：documentId={document_id}，结果={row}")
@@ -659,6 +682,18 @@ def _run_variant(
             summary["databaseValidation"] = {"documents": database_rows, "status": "pending", "durationMs": round((time.perf_counter() - database_started) * 1000, 3)}
             _validate_database_rows(database_rows, document_ids)
             summary["databaseValidation"]["status"] = "passed"
+            # 跳过的图片属于合法终态，但必须显式落盘，避免「静默少图」被无声放过。
+            summary["databaseValidation"]["skippedImages"] = {
+                "total": sum(int(row["skippedCount"]) for row in database_rows.values()),
+                "documents": {
+                    document_id: {
+                        "indexedCount": int(row["indexedCount"]),
+                        "skippedCount": int(row["skippedCount"]),
+                    }
+                    for document_id, row in database_rows.items()
+                    if int(row["skippedCount"]) > 0
+                },
+            }
         else:
             summary["databaseValidation"] = {"status": "not_applicable", "reason": "未取得文档 ID"}
         if len(samples) != expected_total or len(measured) != measure_samples:
