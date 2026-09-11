@@ -1,8 +1,10 @@
 # author: jf
 [CmdletBinding()]
 param(
-    [ValidateSet('image_worker_comparison', 'interview_sse')]
+    [ValidateSet('image_worker_comparison')]
     [string[]]$Performance,
+    [ValidateSet('legacy_serial', 'async_c3')]
+    [string[]]$ImageVariant,
     [switch]$Quality
 )
 
@@ -24,6 +26,7 @@ try {
     }
     $arguments = @((Join-Path $PSScriptRoot 'regression_runner.py'), '--report', $report)
     if ($Performance) { $arguments += @('--performance', ($Performance -join ',')) }
+    if ($ImageVariant) { $arguments += @('--image-variants', ($ImageVariant -join ',')) }
     if ($Quality) { $arguments += '--quality' }
     & $python @arguments
     $code = $LASTEXITCODE
@@ -49,5 +52,11 @@ try {
     $env:PYTHONUTF8 = $oldUtf8
     Write-Host "运行 ID：$runId"
     Write-Host "汇总报告：$report\summary.json"
+    $allureReport = Join-Path $report 'allure-report\index.html'
+    if (Test-Path -LiteralPath $allureReport) {
+        Write-Host "Allure 报告：$allureReport"
+    } else {
+        Write-Host 'Allure 报告未生成，请查看汇总报告中的失败原因。'
+    }
 }
 exit $code

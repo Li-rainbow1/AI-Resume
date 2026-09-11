@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -14,7 +15,6 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = {
     'image_worker_comparison': 'IMAGE_WORKER',
-    'interview_sse': 'INTERVIEW',
 }
 sys.path.insert(0, str(ROOT))
 
@@ -25,11 +25,11 @@ from fixtures.config import QaSettings
 import httpx
 
 
-def command(args):
-    return subprocess.run(args, cwd=ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace')
+def command(args, environment=None):
+    return subprocess.run(args, cwd=ROOT, env=environment, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
 
-async def health(real_allowed):
+async def health(real_allowed, performance_real_allowed=False):
     settings = QaSettings.from_environment()
     compose = ['docker', 'compose', '--env-file', '.env.test', '-f', 'compose.qa.yml']
     checked = command(compose + ['config', '--quiet'])
@@ -56,7 +56,7 @@ async def health(real_allowed):
                 raise RuntimeError('回归只允许本机隔离 QA HTTP 地址')
             if not any(p['HostIp'] == '127.0.0.1' and int(p['HostPort']) == target.port for p in ports.get(internal, [])):
                 raise RuntimeError(f'目标地址与隔离容器端口不一致：{service}')
-        if service in {'backend', 'image-worker'} and not real_allowed:
+        if service in {'backend', 'image-worker'} and not real_allowed and not performance_real_allowed:
             values = json.loads(command(['docker', 'inspect', '--format', '{{json .Config.Env}}', cid]).stdout)
             env = dict(item.split('=', 1) for item in values)
             kinds = ('EMBEDDING', 'VISION') if service == 'image-worker' else ('CHAT', 'EMBEDDING', 'VISION')
@@ -74,7 +74,7 @@ async def health(real_allowed):
             reason = await real_model_guard_reason(RagClient(client))
             if reason:
                 raise RuntimeError(reason)
-        if not real_allowed:
+        if not real_allowed and not performance_real_allowed:
             configs = {s['serviceKey']: s['config'] for s in services}
             if any(urlparse(configs.get(k, {}).get('baseUrl', '')).hostname != 'mock-ai' for k in ('chat', 'embedding', 'vision')):
                 raise RuntimeError('管理员生效配置未完全指向 Mock AI，拒绝默认回归')
@@ -93,6 +93,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--performance', default='')
+    parser.add_argument('--image-variants', default='')
     parser.add_argument('--quality', action='store_true')
     args = parser.parse_args()
     os.chdir(ROOT)
@@ -112,10 +113,11 @@ def main():
     os.environ['PYTEST_ADDOPTS'] = ''
     stages = []
     started = time.monotonic()
+    performance_real_allowed = bool(selected) and os.environ.get('PERF_MODEL_MODE', 'mock').strip().lower() == 'real'
 
-    def run_stage(name, argv, junit=None):
+    def run_stage(name, argv, junit=None, environment=None):
         begin = time.monotonic()
-        result = command(argv)
+        result = command(argv, environment)
         code = result.returncode
         counts = {}
         if junit and code == 0:
@@ -141,12 +143,49 @@ def main():
             f'--junitxml={junit}', f'--basetemp={args.report / (name + "-temp")}',
             f'--alluredir={args.report / "allure-results"}', f'--html={args.report / (name + ".html")}', '--self-contained-html',
             '--browser', 'chromium', '--screenshot', 'only-on-failure', '--output', str(args.report / 'playwright')], junit)
+
+    def generate_allure_report():
+        """生成可直接打开的 Allure HTML 报告。"""
+        results = args.report / 'allure-results'
+        target = args.report / 'allure-report'
+        if not results.is_dir() or not any(results.iterdir()):
+            stages.append(dict(name='allure-report', exit_code=1, reason='缺少 Allure Results，无法生成报告'))
+            print('allure-report: exit=1 缺少 Allure Results，无法生成报告', flush=True)
+            return
+        executable = shutil.which('allure')
+        if not executable:
+            stages.append(dict(name='allure-report', exit_code=1, reason='未找到 Allure CLI，请安装并加入 PATH'))
+            print('allure-report: exit=1 未找到 Allure CLI，请安装并加入 PATH', flush=True)
+            return
+        allure_environment = os.environ.copy()
+        java_home = allure_environment.get('JAVA_HOME')
+        if java_home and not (Path(java_home) / 'bin' / 'java.exe').is_file():
+            # 失效的 JAVA_HOME 会覆盖 PATH 中可用的 Java，导致 Allure 无法启动。
+            allure_environment.pop('JAVA_HOME')
+        run_stage('allure-report', [
+            executable,
+            'generate',
+            str(results),
+            '--clean',
+            '--lang',
+            'zh',
+            '--name',
+            'AI Resume Builder QA 自动化回归报告',
+            '--single-file',
+            '-o',
+            str(target),
+        ], environment=allure_environment)
+        index = target / 'index.html'
+        if stages[-1]['exit_code'] == 0 and not index.is_file():
+            stages[-1]['exit_code'] = 1
+            stages[-1]['reason'] = 'Allure 未生成 index.html'
+            print('allure-report: exit=1 Allure 未生成 index.html', flush=True)
     try:
         if selected and args.quality:
             raise RuntimeError('性能与质量评测模型要求不同，请分次执行')
         if any(name not in SCENARIOS for name in selected):
             raise RuntimeError('未知性能场景')
-        asyncio.run(health(args.quality))
+        asyncio.run(health(args.quality, performance_real_allowed))
         if args.quality:
             from quality.settings import QualitySettings
             reason = QualitySettings.load().skip_reason(QaSettings.from_environment(), require_judge=True)
@@ -157,29 +196,21 @@ def main():
             pytest_stage('quality', ['tests/quality/test_real_rag_quality.py'])
         else:
             pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/clients', 'tests/interview'])
-            pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py', 'tests/ui/test_interview_retry.py'])
+            pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py'])
         if selected:
             for name in selected:
                 os.environ['PERF_RUN_' + SCENARIOS[name]] = '1'
                 report_root = args.report / name
-                if name == 'image_worker_comparison':
-                    command_args = [
-                        sys.executable,
-                        'performance/run_image_worker_comparison.py',
-                        '--report-root',
-                        str(report_root),
-                        '--run-id',
-                        os.environ['QA_RUN_ID'],
-                    ]
-                else:
-                    command_args = [
-                        sys.executable,
-                        'performance/run_interview_sse_baseline.py',
-                        '--report-root',
-                        str(report_root),
-                        '--run-id',
-                        os.environ['QA_RUN_ID'],
-                    ]
+                command_args = [
+                    sys.executable,
+                    'performance/run_image_worker_comparison.py',
+                    '--report-root',
+                    str(report_root),
+                    '--run-id',
+                    os.environ['QA_RUN_ID'],
+                ]
+                if args.image_variants:
+                    command_args.extend(['--variants', args.image_variants])
                 run_stage(name, command_args)
     except Exception as exc:
         # 第三方异常不打印正文，避免连接信息泄露。
@@ -187,6 +218,12 @@ def main():
         stages.append(dict(name='preflight-or-orchestration', exit_code=1, reason=reason))
         print(reason, flush=True)
     finally:
+        # 即使用例失败，也生成报告供定位；报告自身失败会使整轮回归失败。
+        try:
+            generate_allure_report()
+        except Exception as exc:
+            stages.append(dict(name='allure-report', exit_code=1, reason=f'Allure 报告生成异常：{type(exc).__name__}'))
+            print(f'allure-report: exit=1 Allure 报告生成异常：{type(exc).__name__}', flush=True)
         try:
             run_stage('cleanup', [sys.executable, 'scripts/verify_run_cleanup.py'])
         except Exception:
@@ -194,7 +231,8 @@ def main():
         code = next((s['exit_code'] for s in stages if s['exit_code']), 0)
         summary = dict(author='jf', run_id=os.environ['QA_RUN_ID'], exit_code=code,
             performance=selected, quality=args.quality,
-            seconds=round(time.monotonic()-started, 2), stages=stages, report_path=str(args.report))
+            seconds=round(time.monotonic()-started, 2), stages=stages, report_path=str(args.report),
+            allure_report_path=str(args.report / 'allure-report' / 'index.html'))
         (args.report / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     return code
 

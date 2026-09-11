@@ -90,7 +90,7 @@ class ResourceRegistry:
                 # 回合可能在落库前失败；此时不存在精确 ID 也代表没有残留。
                 self.sessions.discard(session_id)
 
-    def verify_interview_request(self, session_id: str, request_id: str) -> bool:
+    def verify_interview_request(self, session_id: str, request_id: str, expected_reply: str) -> bool:
         """核验服务端已落库的会话归属，防止流式结果串到其他请求。"""
         if session_id not in self.sessions or not request_id:
             return False
@@ -116,11 +116,16 @@ class ResourceRegistry:
             response = json.loads(row[2] or "{}")
         except (TypeError, json.JSONDecodeError):
             return False
+        user_messages = [str(item[1] or "") for item in messages if item[0] == "user"]
+        assistant_messages = [str(item[1] or "") for item in messages if item[0] == "assistant"]
         return (
             isinstance(completed, list) and request_id in completed
-            and isinstance(response, dict) and request_id in str(response.get("assistantReply") or "")
+            and isinstance(response, dict) and response.get("sessionId") == session_id
+            and bool(expected_reply.strip())
+            and response.get("assistantReply") == expected_reply
             and len(messages) == 2 and {item[0] for item in messages} == {"user", "assistant"}
-            and all(request_id in str(item[1]) for item in messages)
+            and any(request_id in content for content in user_messages)
+            and assistant_messages == [expected_reply]
         )
 
     def _delete_exact_resume(self, resume_id: str, name: str) -> bool:

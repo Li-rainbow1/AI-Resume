@@ -1,12 +1,32 @@
 # author: jf
 import json
 import time
+import os
+import re
 
 from performance.locustfiles.common.metrics import monotonic_ms, record_metric
 from performance.locustfiles.common.sse_client import read_sse
 
 
+def upload_failure(stream) -> str:
+    if stream is None:
+        return "上传未返回有效响应"
+    for event in stream.events:
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if event.get("event") == "error" or result.get("status") == "failed":
+            message = str(result.get("error_message") or event.get("message") or "上传业务失败")
+            for key, value in os.environ.items():
+                if any(word in key for word in ("PASSWORD", "TOKEN", "SECRET", "API_KEY")) and len(value) >= 4:
+                    message = message.replace(value, "[已隐藏]")
+            return re.sub(r"sk-[A-Za-z0-9_-]+", "[已隐藏]", message)[:500]
+    return "上传流缺少合法完成事件或有效文档 ID"
+
+
 def upload_document(client, document):
+    limit = int(os.getenv("PERF_IMAGE_MAX_FILE_SIZE_MB", "10")) * 1024 * 1024
+    for asset in document.assets:
+        if asset.path.stat().st_size > limit:
+            raise ValueError(f"上传素材超过 {limit // 1024 // 1024} MiB 限制")
     endpoint = "/api/ai/rag/upload/stream"
     data = None
     files = [("files", (asset.path.name, asset.path.read_bytes(), asset.content_type)) for asset in document.assets]
@@ -27,7 +47,15 @@ def upload_document(client, document):
         complete = any(event.get("event") == "batch-complete" for event in stream.events)
         result = next((item for item in results if isinstance(item, dict) and item.get("status") == "success"), None)
         if not complete or not result or not result.get("document_id") or int(result.get("inserted_count") or 0) <= 0:
-            response.failure("上传 SSE 缺少成功 file-result 或 batch-complete")
+            event_summary = [
+                {
+                    "event": str(event.get("event") or ""),
+                    "status": str((event.get("result") or {}).get("status") or "") if isinstance(event.get("result"), dict) else "",
+                    "hasDocumentId": bool((event.get("result") or {}).get("document_id")) if isinstance(event.get("result"), dict) else False,
+                }
+                for event in stream.events
+            ]
+            response.failure(f"{upload_failure(stream)}；事件摘要：{json.dumps(event_summary, ensure_ascii=False)}")
             record_metric("RAG 上传 SSE 完整时间", stream.complete_ms, "业务断言失败")
             return None, stream
         response.success()

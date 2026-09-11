@@ -4,15 +4,87 @@ import hashlib
 import os
 from pathlib import Path
 from threading import Lock
+from threading import Event, Thread
+import time
 
 from locust import between, events, task
 
+from performance.locustfiles.common import locust_compat  # noqa: F401
 from performance.locustfiles.common.base import QaPerformanceUser
 from performance.locustfiles.common.metrics import monotonic_ms, record_metric
-from performance.locustfiles.common.rag_client import poll_image_parsing, upload_document
+from performance.locustfiles.common.rag_client import poll_image_parsing, upload_document, upload_failure
+from performance.locustfiles.common.data_factory import IMAGE_COUNT
 
 
 _SAMPLE_LOCK = Lock()
+_QUEUE_STOP = Event()
+_QUEUE_THREAD: Thread | None = None
+
+
+def _queue_snapshot() -> dict[str, object]:
+    """读取图片 Stream 的长度、未投递数和消费组 pending 数。"""
+    from redis import Redis
+
+    host = os.getenv("PERF_IMAGE_QUEUE_REDIS_HOST", "127.0.0.1")
+    port = int(os.getenv("PERF_IMAGE_QUEUE_REDIS_PORT", "0"))
+    if port <= 0:
+        raise RuntimeError("图片解析队列监控缺少 Redis 端口")
+    client = Redis(host=host, port=port, db=0, decode_responses=True, socket_timeout=2)
+    try:
+        stream_name = "rag:image-enrichment"
+        group_name = "rag-image-enrichment-workers"
+        groups = client.xinfo_groups(stream_name)
+        group = next((item for item in groups if str(item.get("name")) == group_name), {})
+        pending = client.xpending(stream_name, group_name)
+        if isinstance(pending, dict):
+            pending_count = int(pending.get("pending") or 0)
+        elif isinstance(pending, (list, tuple)):
+            pending_count = int(pending[0] or 0) if pending else 0
+        else:
+            pending_count = 0
+        return {
+            "timestampEpochMs": round(time.time() * 1000, 3),
+            "streamLength": int(client.xlen(stream_name)),
+            "undeliveredCount": int(group.get("lag") or 0),
+            "pendingCount": pending_count,
+        }
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
+def _queue_monitor() -> None:
+    target = os.getenv("PERF_IMAGE_QUEUE_METRICS_PATH", "").strip()
+    if not target:
+        return
+    path = Path(target)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    while not _QUEUE_STOP.is_set():
+        try:
+            with _SAMPLE_LOCK, path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(_queue_snapshot(), ensure_ascii=False) + "\n")
+        except Exception as exc:
+            with _SAMPLE_LOCK, path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"error": type(exc).__name__, "timestampEpochMs": round(time.time() * 1000, 3)}, ensure_ascii=False) + "\n")
+        _QUEUE_STOP.wait(1.0)
+
+
+@events.test_start.add_listener
+def start_queue_monitor(environment, **_kwargs) -> None:
+    global _QUEUE_THREAD
+    if os.getenv("PERF_IMAGE_VARIANT", "") == "legacy_serial":
+        return
+    _QUEUE_STOP.clear()
+    _QUEUE_THREAD = Thread(target=_queue_monitor, name="image-queue-monitor", daemon=True)
+    _QUEUE_THREAD.start()
+
+
+@events.quitting.add_listener
+def stop_queue_monitor(environment, **_kwargs) -> None:
+    _QUEUE_STOP.set()
+    if _QUEUE_THREAD is not None:
+        _QUEUE_THREAD.join(timeout=3)
 
 
 def _int_setting(name: str, default: int) -> int:
@@ -32,8 +104,15 @@ def _append_sample(payload: dict) -> None:
         stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-@events.quitting.add_listener
-def write_final_metric_snapshot(environment, **_kwargs) -> None:
+def _write_final_metric_snapshot(environment) -> None:
+    """把三项业务指标即时落盘为快照，供编排器兜底读取。
+
+    关键决策：写入点必须早于各组 on_stop 的清理逻辑。`test_stopping` 在停止用户之前触发，
+    而 `quitting` 只有在进程正常走到 Locust 的 shutdown() 时才会触发；一旦进程在测试结束
+    之后被强制中断（例如清理阶段被外部守卫或信号打断），`quitting` 不会执行，快照会连带
+    丢失，整轮报告只剩「未生成指标快照」而看不到任何业务数据。提前写可以避免这种证据丢失。
+    重复触发是幂等的：同一次运行写入内容一致，后写覆盖前写。
+    """
     output = os.getenv("PERF_IMAGE_WORKER_SUMMARY_PATH", "").strip()
     if not output:
         return
@@ -59,6 +138,18 @@ def write_final_metric_snapshot(environment, **_kwargs) -> None:
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@events.test_stopping.add_listener
+def snapshot_final_metrics_on_stopping(environment, **_kwargs) -> None:
+    # 主要写入点：早于用户 on_stop 清理，能扛住此后发生的强制中断。
+    _write_final_metric_snapshot(environment)
+
+
+@events.quitting.add_listener
+def snapshot_final_metrics_on_quitting(environment, **_kwargs) -> None:
+    # 兜底写入点：覆盖没有经过 test_stopping 的退出路径，重复写入内容一致。
+    _write_final_metric_snapshot(environment)
 
 
 class ImageWorkerUser(QaPerformanceUser):
@@ -90,17 +181,17 @@ class ImageWorkerUser(QaPerformanceUser):
             if phase == "measure":
                 record_metric("图片解析业务校验", 0, "图片请求异常")
             if self._sample_index >= self._target_count:
-                self.environment.runner.quit()
+                locust_compat.finish_run(self.environment)
 
     def _upload_and_wait(self) -> None:
         if self._sample_index >= self._target_count:
-            self.environment.runner.quit()
+            locust_compat.finish_run(self.environment)
             return
         self._sample_index += 1
         sample_index = self._sample_index
         is_measurement = sample_index > self._warmup_count
         variant = os.getenv("PERF_IMAGE_VARIANT", "unknown")
-        document = self.data_factory.document("pdf", image_count=6)
+        document = self.data_factory.document("pdf", image_count=IMAGE_COUNT)
         self.registry.expect_document(document.file_name)
         total_started = monotonic_ms()
         result, stream = upload_document(self.client, document)
@@ -111,7 +202,7 @@ class ImageWorkerUser(QaPerformanceUser):
         status_elapsed = 0.0
         error = ""
         if not result or not stream or not document_id:
-            error = "上传流未返回有效文档 ID"
+            error = upload_failure(stream)
         elif os.getenv("PERF_IMAGE_USE_STATUS_POLL", "0") == "1":
             status, status_elapsed = poll_image_parsing(
                 self.client,
@@ -136,6 +227,8 @@ class ImageWorkerUser(QaPerformanceUser):
             "status": (status or {}).get("status") if status else "upload-complete",
             "success": not error,
             "error": error or None,
+            "startedAtEpochMs": round((time.time() * 1000) - total_ms, 3),
+            "finishedAtEpochMs": round(time.time() * 1000, 3),
         }
         _append_sample(sample)
         if is_measurement:
@@ -143,10 +236,10 @@ class ImageWorkerUser(QaPerformanceUser):
             record_metric("发起上传至图片解析完成总耗时", total_ms, error or None)
             record_metric("图片解析业务校验", total_ms, error or None)
         if self._sample_index >= self._target_count:
-            self.environment.runner.quit()
+            locust_compat.finish_run(self.environment)
 
     def on_stop(self) -> None:
-        # 三组对比在编排器完成数据库核验后销毁其专属容器与数据卷，避免提前删掉待核验记录。
+        # 每组对比在编排器完成数据库核验后销毁专属容器与数据卷，避免提前删掉待核验记录。
         if os.getenv("PERF_IMAGE_DEFER_CLEANUP", "0") == "1":
             try:
                 if hasattr(self, "data_factory"):

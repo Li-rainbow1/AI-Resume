@@ -1,0 +1,74 @@
+{
+  "author": "jf",
+  "version": "performance-image-real-v2-five-pages",
+  "imageCount": 5,
+  "pageCount": 5,
+  "sourcePdf": {
+    "fileName": "Omni_Contextual_Aggregation_Networks_for_High-Fidelity_Image_Inpainting.pdf",
+    "sha256": "f04c6f3134d30b4d92d5724cfd2e6526f524ba27c4bf4969efaa88a4315db0a6",
+    "selectedPages": [
+      4,
+      5,
+      6,
+      9
+    ]
+  },
+  "images": [
+    {
+      "path": "assets/source-page-04-image-01.jpg",
+      "kind": "real_embedded_image",
+      "sourcePage": 4,
+      "sourceObject": "page-04-000.jpg",
+      "width": 4274,
+      "height": 1887,
+      "bytes": 650928,
+      "sha256": "0106b0e85a61891410600e2f458b71f9fb6ab93e44b08ef065cab17d509ecf46"
+    },
+    {
+      "path": "assets/source-page-05-image-01.jpg",
+      "kind": "real_embedded_image",
+      "sourcePage": 5,
+      "sourceObject": "page-05-000.jpg",
+      "width": 2075,
+      "height": 1247,
+      "bytes": 218717,
+      "sha256": "0bcc58ec59934aee4af8d23247b4f17e444ea70b18f3c1747d9d8e631df76642"
+    },
+    {
+      "path": "assets/source-page-05-image-02.jpg",
+      "kind": "real_embedded_image",
+      "sourcePage": 5,
+      "sourceObject": "page-05-001.jpg",
+      "width": 2075,
+      "height": 553,
+      "bytes": 84487,
+      "sha256": "ae496e566de0237f2e0714b3e490ce401e47519b9ac1252f6e5987c80a324bdd"
+    },
+    {
+      "path": "assets/source-page-06-image-01.jpg",
+      "kind": "real_embedded_image",
+      "sourcePage": 6,
+      "sourceObject": "page-06-000.jpg",
+      "width": 2010,
+      "height": 852,
+      "bytes": 114689,
+      "sha256": "900c94f1f17850d9020cad1335efe053f15f3463121bb625f02d985545399e6e"
+    },
+    {
+      "path": "assets/source-page-09-image-01.ppm",
+      "kind": "real_embedded_image",
+      "sourcePage": 9,
+      "sourceObject": "page-09-000.ppm",
+      "width": 2736,
+      "height": 1029,
+      "bytes": 8446049,
+      "sha256": "52bcbfe27abd3c7c4828ab7ede48028d731a12b89d8d07edffe3829c94d1b9db"
+    }
+  ],
+  "pdf": {
+    "path": "five-images.pdf",
+    "bytes": 6996332,
+    "sha256": "df1aa496c7882465675651c50ed01e01d07fb7b3d0484f41c19803deb2f95298"
+  },
+  "status": "已固定真实 PDF 内嵌图片，未执行性能测试"
+}
