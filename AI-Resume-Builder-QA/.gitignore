@@ -9,6 +9,8 @@ htmlcov/
 .mypy_cache/
 .env
 .env.test
+# refresh_real_model_env.py 会为 .env.test 生成含真实密钥的备份，必须一并忽略
+.env.test.bak-*
 *.egg-info/
 build/
 dist/
