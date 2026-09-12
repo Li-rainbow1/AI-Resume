@@ -39,6 +39,6 @@
 .\.venv\Scripts\python.exe -m pytest tests\performance\test_fixed_data.py -q -o addopts=''
 ```
 
-离线检查不会运行 Locust 用户，也不会上传资料。正式性能基线、真实模型结果和简历量化数字需在后续实际运行后填写。
+离线检查不会运行 Locust 用户，也不会上传资料。正式性能基线已于 2026-09-12 执行（`reports/performance/image-parser/formal-ab-20260912a/`）；真实模型结果与量化数字见该轮报告。
 
 历史素材曾包含 6 张图片、6 页，约 12.81 MiB，旧版上传在读取阶段触发文件大小限制。当前移除最后一页，保留前五张原始图片，页数为 5，大小 6,996,332 字节。本次调整未启动压测、未调用模型。

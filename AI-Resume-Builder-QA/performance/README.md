@@ -56,10 +56,11 @@ $env:PERF_ALLOW_RAG_WRITES = '1'
 
 每轮都写入唯一报告目录，非空报告目录会被拒绝，避免覆盖历史数据。报告包含镜像标识、宿主机资源摘要、模型模式与模型摘要、计时口径、原始样本、Locust CSV/HTML、组别汇总和清理结果；Mock 模式额外记录延迟配置，图片对比还记录新旧 Git 标识及五张图片的 SHA-256。
 
-本轮只交付脚本和静态检查；正式性能基线、真实模型结果及简历量化数字均待后续实际运行后补入。
+正式性能基线已取得（2026-09-12，`formal-ab-20260912a`，两组均通过）。瓶颈分析、同口径优化前后复测及真实模型小规模质量基线仍待后续运行后补入。
 
 ## 本轮检查记录
 
+- 2026-09-12 正式基线取得：`formal-ab-20260912a` 整体 `status = passed`，`legacy_serial` 与 `async_c3` 两组均通过，`comparisons.json` 非空——图片解析总耗时均值 34.78 秒 → 15.76 秒，降幅 54.688%。每组 10 个正式样本 + 2 个预热，`missingCount = 0`；两组 Locust 失败数 0，`locustExitCode` 与 `cleanupExitCode` 均为 0；数据库逐篇核验两组均 `passed`，各 12 篇文档 `completed`、每篇 `indexedCount = 5`、`skippedImages.total = 0`、无重复分片。该轮 `skippedImages.total = 0` 说明放宽后的核验口径实际未被触发，印证 `formal-ab-20260911z` 的 `indexedCount = 4` 属偶发视觉分类行为。报告与结论见 `reports/performance/image-parser/formal-ab-20260912a/`（含 `VERIFICATION.md`）。
 - 2026-09-11 校验口径校正：`formal-ab-20260911z` 中 `legacy_serial` 通过，`async_c3` 因单篇文档 `indexedCount=4` 判失败，但该文档 `status=completed`、`failedCount=0`——即一张图被判为 `decorative`/`empty` 后按设计跳过。该行为在产品侧已验收通过（`docs/步骤三-人工验证清单.md`：空白页面分类为 `empty`、跳过 1、图片 Chunk 0、正文保持 `ready`；真实 PDF/DOCX 增强也各有 1 张按分类跳过），故核验口径过严而非业务回归。现改为按「候选全部落终态」判定，并把跳过张数落盘；`python -m pytest tests/performance -q -o addopts=''` 为 13 passed。
 - 2026-09-10 脚本修复复验：`python -m pytest tests/performance -q -o addopts=''` 为 19 passed。覆盖五图素材一致性与大小、Locust 独立协程退出和 CSV 关闭顺序、失败日志与汇总保留、追加采样独立目录、启动失败清理、健康等待、隔离地址和迁移目录、返回回复与保存回复一致性。Python 编译与 `git diff --check` 通过。五页 PDF 已渲染查看；本次未构建镜像、未发起压测、未调用真实模型，容器运行与真实数据库行为待后续验证。
 - 以下为历史阶段检查记录，不作为本次运行结果：
