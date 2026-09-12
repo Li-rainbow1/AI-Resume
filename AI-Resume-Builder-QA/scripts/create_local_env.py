@@ -75,7 +75,6 @@ def main() -> None:
         "QA_ALLOW_QUALITY_WRITES": "0",
         "QA_QUALITY_REAL_MODELS_CONFIRMED": "0",
         "QA_ALLOW_REMOTE_QUALITY": "0",
-        "QA_QUALITY_REPEAT_COUNT": "2",
         "QA_RUN_DEEPEVAL": "0",
     }
     content = "# 本文件仅用于本机隔离 QA 环境，禁止提交。\n"

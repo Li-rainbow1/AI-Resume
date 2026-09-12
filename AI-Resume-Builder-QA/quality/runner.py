@@ -9,19 +9,29 @@ from quality.assets import QualityAssetFactory
 from quality.bad_cases import classify_bad_case
 from quality.dataset import load_golden_dataset
 from quality.deepeval_adapter import evaluate_with_deepeval
-from quality.metrics import evaluate_case, repeated_run_stability
+from quality.metrics import evaluate_case
 from quality.models import CaseResult
 from quality.reporting import write_reports
 
 
-def _file_result(events: list[dict[str, Any]]) -> dict[str, Any]:
-    matches = [event.get("result") for event in events if event.get("event") == "file-result"]
-    result = next((item for item in matches if isinstance(item, dict) and item.get("status") == "success"), None)
-    if not result or not result.get("document_id"):
-        raise AssertionError("上传 SSE 缺少成功 file-result 或 document_id")
+def _successful_file_results(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """取出本批次所有成功的 file-result；缺少 batch-complete 视为上传未结束。"""
     if not any(event.get("event") == "batch-complete" for event in events):
         raise AssertionError("上传 SSE 缺少 batch-complete")
-    return result
+    return [
+        result
+        for event in events
+        if event.get("event") == "file-result"
+        for result in [event.get("result")]
+        if isinstance(result, dict) and result.get("status") == "success" and result.get("document_id")
+    ]
+
+
+def _file_result(events: list[dict[str, Any]]) -> dict[str, Any]:
+    results = _successful_file_results(events)
+    if not results:
+        raise AssertionError("上传 SSE 缺少成功 file-result 或 document_id")
+    return results[0]
 
 
 async def run_quality_evaluation(
@@ -29,7 +39,6 @@ async def run_quality_evaluation(
     registry: CreatedDocumentRegistry,
     run_id: str,
     temp_root: Path,
-    repeat_count: int,
     image_timeout: float,
     image_interval: float,
     include_deepeval: bool,
@@ -53,14 +62,22 @@ async def run_quality_evaluation(
         "judge_repeat_count": (
             max(1, int(os.getenv("DEEPEVAL_JUDGE_REPEAT_COUNT", "1"))) if include_deepeval else 0
         ),
-        "repeat_count": repeat_count,
     }
     corpus = QualityAssetFactory(temp_root, run_id).create()
     registry.expect(corpus.expected_file_name)
+    for noise_file_name in corpus.noise_file_names:
+        registry.expect(noise_file_name)
     try:
-        upload = _file_result(await rag_client.upload_stream(corpus.assets))
+        upload = _file_result(await rag_client.upload_stream(corpus.primary_assets))
         document_id = str(upload["document_id"])
         registry.register(document_id, corpus.expected_file_name)
+        # 干扰文档必须与本轮主文档同时入库，否则 Precision@K 与 MRR 会退化为定值。
+        # 纯文本上传走普通端点，文件名即登记名；数量不足时直接判失败，不做静默降级。
+        noise_results = _successful_file_results(await rag_client.upload_stream(corpus.noise_assets))
+        if len(noise_results) != len(corpus.noise_assets):
+            raise AssertionError("干扰文档上传数量与预期不一致")
+        for noise_asset, noise_result in zip(corpus.noise_assets, noise_results, strict=True):
+            registry.register(str(noise_result["document_id"]), noise_asset.relative_path)
         enrichment = await rag_client.poll_image_enrichment(document_id, image_timeout, image_interval)
         if enrichment.get("status") != "completed" or int(enrichment.get("failedCount") or 0) > 0:
             raise AssertionError("图片解析未完成或存在失败记录")
@@ -68,8 +85,6 @@ async def run_quality_evaluation(
         # 上传和图片解析失败时仍生成逐条证据，异常正文不会进入报告。
         setup_results: list[CaseResult] = []
         for case in cases:
-            metrics = evaluate_case(case, "", [])
-            metrics["repeated_run_stability"] = 0.0
             setup_results.append(
                 CaseResult(
                     case_id=case.case_id,
@@ -77,7 +92,7 @@ async def run_quality_evaluation(
                     actual_answer="",
                     reference_answer=case.reference_answer,
                     sources=[],
-                    deterministic_metrics=metrics,
+                    deterministic_metrics=evaluate_case(case, "", []),
                     failure_reasons=[type(exc).__name__],
                     bad_case_categories=["上游模型或网络失败"],
                 )
@@ -87,20 +102,16 @@ async def run_quality_evaluation(
 
     results: list[CaseResult] = []
     for case in cases:
-        attempts: list[tuple[str, list[dict[str, Any]]]] = []
         upstream_error = None
         try:
-            for _ in range(repeat_count):
-                response = await rag_client.query(case.question, case.top_k)
-                answer = str(response.get("answer") or "")
-                sources = [item for item in response.get("sources") or [] if isinstance(item, dict)]
-                attempts.append((answer, sources))
+            response = await rag_client.query(case.question, case.top_k)
+            answer = str(response.get("answer") or "")
+            sources = [item for item in response.get("sources") or [] if isinstance(item, dict)]
         except Exception as exc:
             # 报告只保留异常类型，避免错误文本夹带地址或鉴权信息。
             upstream_error = type(exc).__name__
-        answer, sources = attempts[0] if attempts else ("", [])
+            answer, sources = "", []
         metrics = evaluate_case(case, answer, sources)
-        metrics["repeated_run_stability"] = repeated_run_stability(attempts, case.expected_facts)
         categories, reasons = classify_bad_case(case, answer, sources, metrics, upstream_error)
         result = CaseResult(
             case_id=case.case_id,
@@ -131,14 +142,16 @@ async def run_quality_evaluation(
         def _positive_or_not_applicable(value: float | None) -> bool:
             return value is None or value > 0
 
+        # 确定性指标全在检索侧，所以这道门禁只回答「来源找对没有」，不看回答内容。
+        # ⚠️ 无答案题对三项指标全部不适用（都返回 None），三个判定全部放行——这 3 道题
+        # 在确定性层形同无门禁，编造答案只能靠 DeepEval 的 Faithfulness 拦住。
         deterministic_passed = (
             _one_or_not_applicable(metrics["recall_at_k"])
-            and _positive_or_not_applicable(metrics["source_hit_rate"])
-            and _one_or_not_applicable(metrics["image_knowledge_hit_rate"])
-            and metrics["fact_coverage_rate"] == 1
-            and metrics["forbidden_fact_hit_rate"] == 0
-            and _one_or_not_applicable(metrics["no_answer_rejection_rate"])
-            and metrics["repeated_run_stability"] == 1
+            and _positive_or_not_applicable(metrics["precision_at_k"])
+            # MRR 的门禁与 Precision@K 同规则（> 0）。注意它由 recall_at_k == 1 隐含，
+            # 不会收紧原有失败门槛；它的用途是趋势指标——优化排序（如加 Rerank）
+            # 后 MRR 会抬升，而 Recall@K 可能完全不动。
+            and _positive_or_not_applicable(metrics["mrr"])
         )
         judge_passed = not include_deepeval or (
             len(result.deepeval_metrics) == 4

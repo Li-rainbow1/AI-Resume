@@ -7,8 +7,8 @@ from quality.models import CaseResult, GoldenCase
 METRIC_NAMES = {
     "faithfulness": "Faithfulness",
     "answer_relevancy": "Answer Relevancy",
-    "contextual_precision": "Contextual Precision",
     "contextual_recall": "Contextual Recall",
+    "contextual_relevancy": "Contextual Relevancy",
 }
 
 
@@ -16,8 +16,8 @@ def evaluate_with_deepeval(case: GoldenCase, result: CaseResult) -> dict[str, di
     os.environ["DEEPEVAL_DISABLE_DOTENV"] = "1"
     from deepeval.metrics import (
         AnswerRelevancyMetric,
-        ContextualPrecisionMetric,
         ContextualRecallMetric,
+        ContextualRelevancyMetric,
         FaithfulnessMetric,
     )
     from deepeval.models import GPTModel
@@ -34,8 +34,8 @@ def evaluate_with_deepeval(case: GoldenCase, result: CaseResult) -> dict[str, di
     metric_factories = {
         "faithfulness": FaithfulnessMetric,
         "answer_relevancy": AnswerRelevancyMetric,
-        "contextual_precision": ContextualPrecisionMetric,
         "contextual_recall": ContextualRecallMetric,
+        "contextual_relevancy": ContextualRelevancyMetric,
     }
     test_case = LLMTestCase(
         input=case.question,

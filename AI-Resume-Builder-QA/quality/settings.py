@@ -16,7 +16,6 @@ class QualitySettings:
     allow_writes: bool
     real_models_confirmed: bool
     allow_remote: bool
-    repeat_count: int
     deepeval_enabled: bool
     judge_configured: bool
 
@@ -28,7 +27,6 @@ class QualitySettings:
             allow_writes=enabled("QA_ALLOW_QUALITY_WRITES"),
             real_models_confirmed=enabled("QA_QUALITY_REAL_MODELS_CONFIRMED"),
             allow_remote=enabled("QA_ALLOW_REMOTE_QUALITY"),
-            repeat_count=max(2, int(os.getenv("QA_QUALITY_REPEAT_COUNT", "2"))),
             deepeval_enabled=enabled("QA_RUN_DEEPEVAL"),
             judge_configured=all(os.getenv(name, "").strip() for name in judge_names),
         )

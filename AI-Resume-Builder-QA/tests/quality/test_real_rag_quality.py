@@ -32,7 +32,6 @@ async def _run(
         created_documents,
         qa_settings.run_id,
         tmp_path / "quality-assets",
-        quality_settings.repeat_count,
         qa_settings.image_poll_timeout_seconds,
         qa_settings.image_poll_interval_seconds,
         include_deepeval,

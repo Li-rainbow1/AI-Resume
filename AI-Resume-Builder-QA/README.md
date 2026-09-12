@@ -126,7 +126,7 @@ AI/RAG 质量评测的数据集、公式、真实模型门禁、DeepEval 配置�
 - 2026-09-09 隔离接口冒烟：AI 面试首轮实际收到 `accepted/processing/chunk/done`，相同 `requestId` 重试只恢复缓存结果；临时面试会话已按精确 ID 清理。
 - 已执行：Chromium 下 Markdown 图片附件上传、图片解析、预览、刷新回显与删除场景 `1 passed`，稳定环境耗时 9.49 秒，清理后残留为 0。
 - 历史范围：五项 Locust 脚本曾完成小流量冒烟；当前性能范围收敛为图片解析串行/并发对比，AI 面试 SSE 流式性能已从当前范围移除。正式性能基线已于 2026-09-12 执行（`reports/performance/image-parser/formal-ab-20260912a/`，总耗时均值降幅 54.688%）；容量结论和优化结论均未执行。
-- 已实现：20 条 Golden Dataset、七项确定性指标、DeepEval 四项指标、Bad Case 分类和质量报告；数据集素材与逐题依据见 `testdata/quality/README.md`，真实模型质量基线尚未执行。
+- 已实现：20 条 Golden Dataset、三项确定性指标（检索侧：Recall@K、Precision@K、MRR）、DeepEval 四项指标、Bad Case 分类和质量报告；数据集素材与逐题依据见 `testdata/quality/README.md`，真实模型质量基线尚未执行。
 - 未执行：真实 Chat、Embedding、Vision/OCR 与固定 Judge 的小规模质量基线；当前 Mock AI 隔离环境不满足真实性门禁。
 - 本轮未做：正式 AI/RAG 质量门禁和远端推送；本地一键回归状态见下文。
 - 未完成内容不得提前写成简历成果。

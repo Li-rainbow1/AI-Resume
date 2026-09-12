@@ -1,41 +1,11 @@
 import re
-from itertools import combinations
 from typing import Any
 
 from quality.models import GoldenCase
 
 
-REFUSAL_MARKERS = ("未提供", "无法从", "没有相关", "暂无相关", "资料中没有", "知识库中未")
-
-
 def normalize_text(value: object) -> str:
     return re.sub(r"\s+|[，。！？、；：,.!?;:\-_/]", "", str(value or "")).lower()
-
-
-def _fact_matches(answer: str, fact: str) -> bool:
-    normalized_answer = normalize_text(answer)
-    alternatives = [normalize_text(item) for item in str(fact or "").split("|")]
-    for candidate in alternatives:
-        if not candidate:
-            continue
-        if re.search(r"\d", candidate):
-            if re.search(rf"(?<!\d){re.escape(candidate)}(?!\d)", normalized_answer):
-                return True
-        elif candidate in normalized_answer:
-            return True
-    return False
-
-
-def fact_coverage(answer: str, facts: list[str]) -> float:
-    return sum(_fact_matches(answer, fact) for fact in facts) / len(facts) if facts else 1.0
-
-
-def forbidden_fact_rate(answer: str, forbidden_facts: list[str]) -> float:
-    return (
-        sum(_fact_matches(answer, fact) for fact in forbidden_facts) / len(forbidden_facts)
-        if forbidden_facts
-        else 0.0
-    )
 
 
 def source_matches(source: dict[str, Any], expected_document: str, location: dict[str, Any] | None = None) -> bool:
@@ -62,62 +32,52 @@ def recall_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None
     return hits / len(expected) if expected else 0.0
 
 
-def source_hit_rate(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+def precision_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+    """Precision@K：TopK 结果中属于预期文档的来源占比，分母固定为 `top_k`。
+
+    分母取 `top_k` 而非实际返回条数，是为了对齐业界标准口径——检索返回不足 K 条时
+    （语料 Chunk 总数小于 top_k）如实扣分，不掩盖召回不足。`dataset.py` 已强制校验
+    `1 <= top_k <= 5`，因此分母不会为零。
+
+    无答案题不适用，返回 None 以免稀释汇总均值。单项是否判失败由 `runner.py` 的
+    `> 0` 门禁决定，该条件等价于「TopK 内至少命中一条预期文档来源」。
+    """
     if case.question_type == "no_answer":
         return None
     considered = sources[: case.top_k]
-    if not considered:
-        # 无答案用例已在上面返回 None，走到这里只会是有答案用例：没有召回到任何来源即记 0 分。
-        return 0.0
     relevant = sum(source_matches(source, case.expected_document) for source in considered)
-    return relevant / len(considered)
+    return relevant / case.top_k
 
 
-def image_knowledge_hit(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
-    if case.question_type not in {"image_ocr", "table_or_flow", "mixed"}:
+def mrr(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+    """单条 MRR 贡献：首个命中预期来源的排名倒数（rank 1 → 1.0、rank 3 → 0.33）。
+
+    相关性判据与 Recall@K 完全一致——命中任一 `expected_source_location` 即相关，复用
+    `source_matches`，因此 MRR 不需要新增任何标注。`summary.json` 对各题取算术平均即为
+    MRR。它补的是 Recall@K 缺的「排序」维度：来源都在 TopK 内时 Recall@K 恒为 1，而
+    MRR 会因正确来源排在后面而下降。
+
+    无答案题不适用，返回 None 以免稀释汇总均值。
+    """
+    if case.question_type == "no_answer":
         return None
-    for source in sources[: case.top_k]:
-        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-        if metadata.get("ingestSource") == "image_vision" and any(
-            source_matches(source, case.expected_document, location) for location in case.expected_source_location
+    for rank, source in enumerate(sources[: case.top_k], start=1):
+        if any(
+            source_matches(source, case.expected_document, location)
+            for location in case.expected_source_location
         ):
-            return 1.0
+            return 1.0 / rank
     return 0.0
 
 
-def no_answer_rejection(case: GoldenCase, answer: str, sources: list[dict[str, Any]]) -> float:
-    if case.question_type != "no_answer":
-        return 1.0
-    normalized = normalize_text(answer)
-    refused = any(normalize_text(marker) in normalized for marker in REFUSAL_MARKERS)
-    return 1.0 if refused and forbidden_fact_rate(answer, case.forbidden_facts) == 0 else 0.0
-
-
 def evaluate_case(case: GoldenCase, answer: str, sources: list[dict[str, Any]]) -> dict[str, float | None]:
+    """三项确定性指标全部在检索侧：只读 sources 与数据集标注，不读模型回答。
+
+    `answer` 仍保留在签名里，但当前没有任何指标消费它——加入生成侧检查时它才是入口。
+    回答质量目前完全由 DeepEval 的四项指标承担。
+    """
     return {
         "recall_at_k": recall_at_k(case, sources),
-        "source_hit_rate": source_hit_rate(case, sources),
-        "image_knowledge_hit_rate": image_knowledge_hit(case, sources),
-        "fact_coverage_rate": fact_coverage(answer, case.expected_facts),
-        "forbidden_fact_hit_rate": forbidden_fact_rate(answer, case.forbidden_facts),
-        "no_answer_rejection_rate": no_answer_rejection(case, answer, sources),
+        "precision_at_k": precision_at_k(case, sources),
+        "mrr": mrr(case, sources),
     }
-
-
-def repeated_run_stability(results: list[tuple[str, list[dict[str, Any]]]], expected_facts: list[str]) -> float:
-    if len(results) < 2:
-        return 1.0
-    signatures: list[set[str]] = []
-    for answer, sources in results:
-        facts = {fact for fact in expected_facts if _fact_matches(answer, fact)}
-        documents = {
-            str((source.get("metadata") or {}).get("documentId"))
-            for source in sources
-            if (source.get("metadata") or {}).get("documentId")
-        }
-        signatures.append({f"fact:{item}" for item in facts} | {f"doc:{item}" for item in documents})
-    scores: list[float] = []
-    for left, right in combinations(signatures, 2):
-        union = left | right
-        scores.append(len(left & right) / len(union) if union else 1.0)
-    return sum(scores) / len(scores)

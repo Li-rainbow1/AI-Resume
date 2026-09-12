@@ -7,10 +7,23 @@ from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 from clients.rag import UploadAsset
 
 
+# 干扰文档素材：纯文本、不带附件，用于让检索侧指标具备区分度。
+_NOISE_SOURCES = ("noise-alpha.md", "noise-beta.md", "legacy-archive.md")
+
+
 @dataclass(frozen=True)
 class QualityCorpus:
-    assets: list[UploadAsset]
+    """一轮评测使用的语料：一篇带图主文档 + 若干纯文本干扰文档。
+
+    只有单篇文档时，检索返回的每一条都属于预期文档，`Precision@K` 与 `MRR`
+    都会退化为定值；加入干扰文档后这两个指标才具备区分度。主文档与干扰文档
+    分两批上传，便于分别登记与清理。
+    """
+
+    primary_assets: list[UploadAsset]
+    noise_assets: list[UploadAsset]
     expected_file_name: str
+    noise_file_names: list[str]
 
 
 class QualityAssetFactory:
@@ -30,20 +43,35 @@ class QualityAssetFactory:
             with Image.open(source_root / "assets" / image_name) as image:
                 self._save(image, asset_dir / image_name)
         badge, table, flow = (asset_dir / image_name for image_name in image_names)
+        # 主文档必须保留 quality-corpus.md 后缀：数据集用 endswith 匹配预期文档，
+        # 干扰文档命名一律避开该后缀，否则会被 source_matches 误判为预期文档。
         file_name = f"qa-rag-{self.run_id}-{uid}-quality-corpus.md"
         markdown = self.root / file_name
         # 人工可查阅的正文与真实评测使用同一份素材，避免两份事实漂移。
-        source = source_root / "quality-corpus.md"
-        markdown.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        self._copy_source(source_root / "quality-corpus.md", markdown)
+        noise_file_names: list[str] = []
+        noise_assets: list[UploadAsset] = []
+        for source_name in _NOISE_SOURCES:
+            noise_file_name = f"qa-rag-{self.run_id}-{uid}-{source_name}"
+            noise_path = self.root / noise_file_name
+            self._copy_source(source_root / source_name, noise_path)
+            noise_file_names.append(noise_file_name)
+            noise_assets.append(UploadAsset(noise_path, "text/markdown", noise_path.name))
         return QualityCorpus(
-            assets=[
+            primary_assets=[
                 UploadAsset(markdown, "text/markdown", markdown.name),
                 UploadAsset(badge, "image/png", "assets/quality-ocr-badge.png", role="attachment"),
                 UploadAsset(table, "image/png", "assets/quality-capacity-table.png", role="attachment"),
                 UploadAsset(flow, "image/png", "assets/quality-review-flow.png", role="attachment"),
             ],
+            noise_assets=noise_assets,
             expected_file_name=file_name,
+            noise_file_names=noise_file_names,
         )
+
+    @staticmethod
+    def _copy_source(source: Path, target: Path) -> None:
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
     @staticmethod
     def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
