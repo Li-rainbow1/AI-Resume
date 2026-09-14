@@ -1,4 +1,6 @@
 import os
+from importlib.metadata import version
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any
 
 from quality.models import CaseResult, GoldenCase
@@ -12,13 +14,29 @@ METRIC_NAMES = {
 }
 
 
+def judge_config_summary() -> dict[str, Any]:
+    """记录实际评分配置；地址去除凭证、查询参数和片段，不记录密钥。"""
+    endpoint = urlsplit(os.environ["DEEPEVAL_JUDGE_BASE_URL"])
+    host = endpoint.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if endpoint.port:
+        host += f":{endpoint.port}"
+    return {
+        "model": os.environ["DEEPEVAL_JUDGE_MODEL"].strip(),
+        "base_url": urlunsplit((endpoint.scheme, host, endpoint.path, "", "")),
+        "temperature": 0,
+        "threshold": float(os.getenv("DEEPEVAL_JUDGE_THRESHOLD", "0.5")),
+        "repeat_count": max(1, int(os.getenv("DEEPEVAL_JUDGE_REPEAT_COUNT", "1"))),
+        "deepeval_version": version("deepeval"),
+    }
+
+
 def evaluate_with_deepeval(case: GoldenCase, result: CaseResult) -> dict[str, dict[str, Any]]:
     os.environ["DEEPEVAL_DISABLE_DOTENV"] = "1"
     from deepeval.metrics import (
-        AnswerRelevancyMetric,
         ContextualRecallMetric,
         ContextualRelevancyMetric,
-        FaithfulnessMetric,
     )
     from deepeval.models import GPTModel
     from deepeval.test_case import LLMTestCase
@@ -32,8 +50,6 @@ def evaluate_with_deepeval(case: GoldenCase, result: CaseResult) -> dict[str, di
     threshold = float(os.getenv("DEEPEVAL_JUDGE_THRESHOLD", "0.5"))
     repeat_count = max(1, int(os.getenv("DEEPEVAL_JUDGE_REPEAT_COUNT", "1")))
     metric_factories = {
-        "faithfulness": FaithfulnessMetric,
-        "answer_relevancy": AnswerRelevancyMetric,
         "contextual_recall": ContextualRecallMetric,
         "contextual_relevancy": ContextualRelevancyMetric,
     }
