@@ -52,7 +52,7 @@
 │  ├─ migrations/             Flyway 版本迁移（mysql / postgresql）
 │  └─ seeds/                  仅供本地导入的演示数据
 ├─ docker/flyway/             Flyway 迁移运行镜像
-├─ .github/workflows/         CI/CD 工作流
+├─ .github/workflows/         CI 构建校验工作流
 ├─ docker-compose.yml         Docker Compose 编排
 ├─ start-docker-python-ai.bat Windows 一键启动
 └─ stop-docker-stack.bat      Windows 一键停止

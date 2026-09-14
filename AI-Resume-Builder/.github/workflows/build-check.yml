@@ -1,0 +1,33 @@
+name: Build Check
+
+# 本仓库是公开的作品展示仓库，流水线只做构建校验，不在此处执行部署。
+# 实际部署由本机手动执行：SSH 到服务器后依次跑数据库迁移与 docker compose 重建镜像。
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
