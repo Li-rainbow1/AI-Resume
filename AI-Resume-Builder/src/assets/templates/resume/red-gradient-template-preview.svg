@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1120" viewBox="0 0 800 1120" role="img" aria-label="Red gradient template preview">
+  <defs>
+    <linearGradient id="heroGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#be124f" />
+      <stop offset="100%" stop-color="#d86b93" />
+    </linearGradient>
+    <linearGradient id="sectionFill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f5dbe3" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#fff5f8" stop-opacity="0.95" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="1120" fill="#ffffff" />
+  <path d="M0 0H800V224H0Z" fill="#fff9fb" />
+  <path d="M0 18C72 8 126 32 182 72C138 68 92 84 48 132C34 104 18 68 0 18Z" fill="none" stroke="#d7d7d7" stroke-width="6" stroke-linecap="round" opacity="0.55" />
+  <path d="M0 56C66 40 116 62 170 102C130 100 86 114 42 156C26 126 12 92 0 56Z" fill="none" stroke="#d7d7d7" stroke-width="6" stroke-linecap="round" opacity="0.42" />
+  <rect x="36" y="40" width="112" height="142" rx="10" fill="#ffffff" stroke="#e8d3da" />
+  <rect x="48" y="54" width="88" height="116" rx="6" fill="#ecd3dc" />
+  <path d="M186 0H800V224H186C176 224 168 216 168 206V18C168 8 176 0 186 0Z" fill="url(#heroGradient)" />
+  <path d="M284 24C418 4 560 20 756 64" fill="none" stroke="#f4bfd0" stroke-width="4" stroke-linecap="round" opacity="0.42" />
+  <path d="M274 48C432 22 584 44 780 96" fill="none" stroke="#f4bfd0" stroke-width="4" stroke-linecap="round" opacity="0.28" />
+  <rect x="214" y="50" width="188" height="28" rx="8" fill="#3d101b" opacity="0.88" />
+  <rect x="214" y="102" width="260" height="16" rx="8" fill="#3d101b" opacity="0.82" />
+  <rect x="214" y="132" width="120" height="16" rx="8" fill="#3d101b" opacity="0.72" />
+  <path d="M0 250C134 228 274 248 430 284C596 322 694 320 800 276" fill="none" stroke="#ecd9df" stroke-width="2.5" opacity="0.55" />
+  <path d="M0 284C138 264 278 286 428 320C590 356 694 354 800 314" fill="none" stroke="#ecd9df" stroke-width="2.5" opacity="0.4" />
+
+  <rect x="32" y="300" width="736" height="28" rx="3" fill="url(#sectionFill)" />
+  <rect x="32" y="300" width="6" height="28" fill="#c11b4c" />
+  <rect x="52" y="308" width="126" height="12" rx="6" fill="#c11b4c" />
+  <rect x="32" y="346" width="736" height="12" rx="6" fill="#d7c7cc" />
+  <rect x="32" y="368" width="710" height="12" rx="6" fill="#d7c7cc" />
+
+  <rect x="32" y="416" width="736" height="28" rx="3" fill="url(#sectionFill)" />
+  <rect x="32" y="416" width="6" height="28" fill="#c11b4c" />
+  <rect x="52" y="424" width="110" height="12" rx="6" fill="#c11b4c" />
+  <rect x="32" y="462" width="156" height="14" rx="7" fill="#3d101b" opacity="0.86" />
+  <rect x="612" y="462" width="156" height="12" rx="6" fill="#5d4d51" opacity="0.7" />
+  <rect x="32" y="488" width="196" height="12" rx="6" fill="#8d7a80" opacity="0.8" />
+  <rect x="32" y="514" width="736" height="10" rx="5" fill="#d7c7cc" />
+  <rect x="32" y="534" width="722" height="10" rx="5" fill="#d7c7cc" />
+  <rect x="32" y="554" width="686" height="10" rx="5" fill="#d7c7cc" />
+
+  <rect x="32" y="604" width="736" height="28" rx="3" fill="url(#sectionFill)" />
+  <rect x="32" y="604" width="6" height="28" fill="#c11b4c" />
+  <rect x="52" y="612" width="110" height="12" rx="6" fill="#c11b4c" />
+  <rect x="32" y="650" width="184" height="14" rx="7" fill="#3d101b" opacity="0.86" />
+  <rect x="622" y="650" width="146" height="12" rx="6" fill="#5d4d51" opacity="0.7" />
+  <rect x="32" y="676" width="150" height="12" rx="6" fill="#8d7a80" opacity="0.8" />
+  <rect x="32" y="702" width="736" height="10" rx="5" fill="#d7c7cc" />
+  <rect x="32" y="722" width="728" height="10" rx="5" fill="#d7c7cc" />
+  <rect x="32" y="742" width="676" height="10" rx="5" fill="#d7c7cc" />
+
+  <rect x="32" y="792" width="736" height="28" rx="3" fill="url(#sectionFill)" />
+  <rect x="32" y="792" width="6" height="28" fill="#c11b4c" />
+  <rect x="52" y="800" width="96" height="12" rx="6" fill="#c11b4c" />
+  <rect x="32" y="838" width="214" height="14" rx="7" fill="#3d101b" opacity="0.86" />
+  <rect x="642" y="838" width="126" height="12" rx="6" fill="#5d4d51" opacity="0.7" />
+  <rect x="32" y="864" width="176" height="12" rx="6" fill="#8d7a80" opacity="0.8" />
+  <rect x="32" y="890" width="736" height="10" rx="5" fill="#d7c7cc" />
+  <rect x="32" y="910" width="694" height="10" rx="5" fill="#d7c7cc" />
+
+  <rect x="32" y="960" width="736" height="28" rx="3" fill="url(#sectionFill)" />
+  <rect x="32" y="960" width="6" height="28" fill="#c11b4c" />
+  <rect x="52" y="968" width="74" height="12" rx="6" fill="#c11b4c" />
+  <rect x="32" y="1006" width="736" height="10" rx="5" fill="#d7c7cc" />
+  <rect x="32" y="1026" width="710" height="10" rx="5" fill="#d7c7cc" />
+</svg>

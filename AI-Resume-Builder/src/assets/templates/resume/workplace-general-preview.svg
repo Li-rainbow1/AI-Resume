@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1120" viewBox="0 0 800 1120" role="img" aria-label="Workplace general template preview">
+  <rect width="800" height="1120" fill="#ffffff" />
+  <rect x="24" y="24" width="752" height="1072" rx="20" fill="#f7faff" stroke="#d0dbec" />
+  <path d="M24 24h752v120c-120 30-632 30-752 0z" fill="#467be8" />
+  <circle cx="400" cy="176" r="58" fill="#ffffff" />
+  <circle cx="400" cy="176" r="44" fill="#c6d7f6" />
+  <rect x="300" y="252" width="200" height="28" rx="10" fill="#22427a" />
+  <rect x="236" y="294" width="328" height="12" rx="6" fill="#5f708f" />
+  <rect x="264" y="324" width="272" height="12" rx="6" fill="#7f90ad" />
+  <rect x="188" y="354" width="424" height="12" rx="6" fill="#7f90ad" />
+  <rect x="56" y="430" width="688" height="18" rx="9" fill="#5a88df" />
+  <rect x="56" y="468" width="688" height="10" rx="5" fill="#c2d2ec" />
+  <rect x="56" y="500" width="688" height="10" rx="5" fill="#c2d2ec" />
+  <rect x="56" y="552" width="688" height="18" rx="9" fill="#5a88df" />
+  <rect x="56" y="590" width="688" height="10" rx="5" fill="#c2d2ec" />
+  <rect x="56" y="622" width="688" height="10" rx="5" fill="#c2d2ec" />
+  <text x="400" y="1038" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="32" fill="#506993">WORKPLACE</text>
+</svg>

@@ -1,0 +1,22 @@
+node_modules
+dist
+dist-ssr
+.git
+.gitignore
+.vscode
+.idea
+.claude
+.codex
+*.md
+*.log
+.env
+.env.*
+.eslintcache
+*.tsbuildinfo
+
+# 前端镜像不需要复制后端工程和工作流产物。
+python-ai-backend
+.workflow
+docs
+sql
+screenshots

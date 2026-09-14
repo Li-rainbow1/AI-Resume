@@ -1,0 +1,79 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment
+.env
+.env.local
+.env.*.local
+# 手工备份含真实密钥，禁止入库
+.env.bak-*
+.env.*.bak-*
+
+# Build output
+*.tsbuildinfo
+
+# Cache
+.eslintcache
+
+# Windows 环境变量未展开时被误写进仓库的路径（如 %SystemDrive%/ProgramData/...）
+%SystemDrive%/
+%SystemRoot%/
+%SystemDrive%/ProgramData/
+%ProgramData%/
+%LOCALAPPDATA%/
+%APPDATA%/
+%TEMP%/
+%USERPROFILE%/
+%HOMEDRIVE%/
+%HOMEPATH%/
+
+# Windows 组件/版本缓存文件（SxS 与 CBS 自动生成，无源码价值）
+cversions*.db
+*.ver0x*.db
+
+# Cypress
+/cypress/videos/
+/cypress/screenshots/
+
+# Vitest
+__screenshots__/
+
+# Vite
+*.timestamp-*-*.mjs
+
+# ========================================
+# 公开仓库排除项
+# 内部文档、协作规范、需求与设计稿、演示截图和本地工作产物只在本地保留，不入公开版本库。
+# ========================================
+docs/
+.workflow/
+.claude/
+.codex/
+.workbuddy/
+code-review/
+screenshots/
+tmp/
+AGENTS.md
+resume-mobile-*.png

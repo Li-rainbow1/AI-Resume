@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1120" viewBox="0 0 800 1120" role="img" aria-label="Blue sidebar career template preview">
+  <rect width="800" height="1120" fill="#ffffff" />
+  <rect x="24" y="24" width="752" height="1072" rx="20" fill="#f5f9ff" stroke="#c9d7ef" />
+  <rect x="24" y="24" width="212" height="1072" rx="20" fill="#2f69d1" />
+  <rect x="64" y="82" width="132" height="168" rx="10" fill="#b9d0fb" />
+  <rect x="56" y="282" width="148" height="28" rx="8" fill="#ecf3ff" />
+  <rect x="56" y="332" width="120" height="20" rx="6" fill="#ecf3ff" />
+  <rect x="56" y="364" width="120" height="20" rx="6" fill="#ecf3ff" />
+  <rect x="56" y="426" width="120" height="20" rx="6" fill="#ecf3ff" />
+  <rect x="56" y="458" width="130" height="20" rx="6" fill="#ecf3ff" />
+  <rect x="266" y="86" width="220" height="28" rx="10" fill="#2f69d1" />
+  <rect x="266" y="134" width="478" height="2" rx="1" fill="#d3e1fb" />
+  <rect x="266" y="176" width="478" height="12" rx="6" fill="#b6c9ea" />
+  <rect x="266" y="208" width="478" height="12" rx="6" fill="#b6c9ea" />
+  <rect x="266" y="278" width="220" height="28" rx="10" fill="#2f69d1" />
+  <rect x="266" y="326" width="478" height="12" rx="6" fill="#b6c9ea" />
+  <rect x="266" y="358" width="478" height="12" rx="6" fill="#b6c9ea" />
+  <text x="504" y="1038" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="32" fill="#46659d">BLUE SIDEBAR</text>
+</svg>

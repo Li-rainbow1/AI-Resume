@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1120" viewBox="0 0 800 1120" role="img" aria-label="Blue linear template preview">
+  <rect width="800" height="1120" fill="#ffffff" />
+  <rect x="24" y="24" width="752" height="1072" rx="20" fill="#f8fbff" stroke="#c7d6f3" />
+  <rect x="56" y="60" width="688" height="170" rx="14" fill="#dce8ff" />
+  <rect x="84" y="94" width="120" height="130" rx="8" fill="#b8cef5" />
+  <rect x="226" y="98" width="300" height="28" rx="8" fill="#5c86de" />
+  <rect x="226" y="136" width="460" height="14" rx="7" fill="#8fa9db" />
+  <rect x="226" y="160" width="510" height="14" rx="7" fill="#8fa9db" />
+  <rect x="56" y="274" width="260" height="28" rx="10" fill="#5c86de" />
+  <rect x="56" y="322" width="688" height="10" rx="5" fill="#bfd1ee" />
+  <rect x="56" y="356" width="688" height="10" rx="5" fill="#bfd1ee" />
+  <rect x="56" y="418" width="260" height="28" rx="10" fill="#5c86de" />
+  <rect x="56" y="466" width="688" height="10" rx="5" fill="#bfd1ee" />
+  <rect x="56" y="500" width="688" height="10" rx="5" fill="#bfd1ee" />
+  <rect x="56" y="534" width="688" height="10" rx="5" fill="#bfd1ee" />
+  <text x="400" y="1038" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="36" fill="#4a67a9">BLUE LINEAR</text>
+</svg>

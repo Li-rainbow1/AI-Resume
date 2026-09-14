@@ -1,0 +1,376 @@
+# Profile 契约：
+# - frontend-only：仅托管构建后的 Vue 前端。
+# - python-ai：前端 + Python AI Backend + 图片 Worker + MySQL + Redis + pgvector + 私有 MinIO；启动脚本可按外部连接配置跳过 pgvector。
+# - migration：仅运行 MySQL 与 PostgreSQL 的 Flyway 版本迁移。
+x-profile-contract:
+  frontend-only: "frontend static site only"
+  python-ai: "frontend + python-ai-backend + python-ai-image-worker + mysql + redis + pgvector + private minio"
+  migration: "versioned MySQL and PostgreSQL database migrations"
+
+x-flyway-common: &flyway-common
+  profiles:
+    - migration
+  image: "${FLYWAY_RUNTIME_IMAGE:-resume-builder-flyway:13.3.0-mysql-26.7.0}"
+  build:
+    context: ./docker/flyway
+    args:
+      FLYWAY_BASE_IMAGE: "${FLYWAY_BASE_IMAGE:-redgate/flyway:13.3.0-alpine@sha256:4c051c4081eda3a84a24e6adf4150fbda408f012c5e5167be3b0e975dc4016fc}"
+  restart: "no"
+  networks:
+    - resume-builder-network
+
+x-common-ai-env: &common-ai-env
+  APP_RAG_TOP_K: "${APP_RAG_TOP_K:-5}"
+  APP_INTERVIEW_RAG_TOP_K: "${APP_INTERVIEW_RAG_TOP_K:-4}"
+  APP_INTERVIEW_RAG_SIMILARITY_THRESHOLD: "${APP_INTERVIEW_RAG_SIMILARITY_THRESHOLD:-0.5}"
+  APP_INTERVIEW_CONTEXT_SOFT_CHARS: "${APP_INTERVIEW_CONTEXT_SOFT_CHARS:-24000}"
+  APP_INTERVIEW_CONTEXT_HARD_CHARS: "${APP_INTERVIEW_CONTEXT_HARD_CHARS:-32000}"
+  APP_INTERVIEW_SUMMARY_CHARS: "${APP_INTERVIEW_SUMMARY_CHARS:-3000}"
+  APP_INTERVIEW_RAG_TIMEOUT_SECONDS: "${APP_INTERVIEW_RAG_TIMEOUT_SECONDS:-3}"
+  APP_AUTH_TOKEN_SECRET: "${APP_AUTH_TOKEN_SECRET:-resume-builder-local-demo-auth-secret}"
+  APP_AUTH_TOKEN_TTL_SECONDS: "${APP_AUTH_TOKEN_TTL_SECONDS:-43200}"
+  APP_AUTH_EMAIL_CODE_SECRET: "${APP_AUTH_EMAIL_CODE_SECRET:-}"
+  APP_AUTH_EMAIL_CODE_COOLDOWN_SECONDS: "${APP_AUTH_EMAIL_CODE_COOLDOWN_SECONDS:-60}"
+  APP_AUTH_EMAIL_CODE_EXPIRY_SECONDS: "${APP_AUTH_EMAIL_CODE_EXPIRY_SECONDS:-600}"
+  APP_AUTH_EMAIL_CODE_MAX_FAILED_ATTEMPTS: "${APP_AUTH_EMAIL_CODE_MAX_FAILED_ATTEMPTS:-5}"
+  APP_SYSTEM_CONFIG_ENCRYPTION_KEY: "${APP_SYSTEM_CONFIG_ENCRYPTION_KEY:-}"
+  MAIL_HOST: "${MAIL_HOST:-smtp.qq.com}"
+  MAIL_PORT: "${MAIL_PORT:-465}"
+  # 留空时由后端依据端口兼容推导：465 为 SSL，其余端口默认为 STARTTLS。
+  MAIL_SECURITY_MODE: "${MAIL_SECURITY_MODE:-}"
+  MAIL_USERNAME: "${MAIL_USERNAME:-}"
+  MAIL_AUTHORIZATION_CODE: "${MAIL_AUTHORIZATION_CODE:-}"
+  MAIL_CONNECTION_TIMEOUT_MILLIS: "${MAIL_CONNECTION_TIMEOUT_MILLIS:-10000}"
+  MAIL_TIMEOUT_MILLIS: "${MAIL_TIMEOUT_MILLIS:-10000}"
+  MAIL_WRITE_TIMEOUT_MILLIS: "${MAIL_WRITE_TIMEOUT_MILLIS:-10000}"
+  OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://api.openai.com}"
+  OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+  OPENAI_CHAT_BASE_URL: "${OPENAI_CHAT_BASE_URL:-https://api.openai.com}"
+  OPENAI_CHAT_API_KEY: "${OPENAI_CHAT_API_KEY:-}"
+  OPENAI_CHAT_COMPLETIONS_PATH: "${OPENAI_CHAT_COMPLETIONS_PATH:-/v1/chat/completions}"
+  OPENAI_CHAT_MODEL: "${OPENAI_CHAT_MODEL:-gpt-5.4}"
+  OPENAI_CHAT_TIMEOUT_SECONDS: "${OPENAI_CHAT_TIMEOUT_SECONDS:-25}"
+  EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-openai}"
+  OPENAI_EMBEDDING_BASE_URL: "${OPENAI_EMBEDDING_BASE_URL:-https://api.openai.com}"
+  OPENAI_EMBEDDING_API_KEY: "${OPENAI_EMBEDDING_API_KEY:-}"
+  OPENAI_EMBEDDING_MODEL: "${OPENAI_EMBEDDING_MODEL:-text-embedding-3-large}"
+  OPENAI_EMBEDDING_TIMEOUT_SECONDS: "${OPENAI_EMBEDDING_TIMEOUT_SECONDS:-10}"
+  OLLAMA_EMBEDDING_BASE_URL: "${OLLAMA_EMBEDDING_BASE_URL:-http://host.docker.internal:11434}"
+  OLLAMA_EMBEDDING_MODEL: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
+  OLLAMA_EMBEDDING_TIMEOUT_SECONDS: "${OLLAMA_EMBEDDING_TIMEOUT_SECONDS:-45}"
+  VISION_PROVIDER: "${VISION_PROVIDER:-openai}"
+  OPENAI_VISION_BASE_URL: "${OPENAI_VISION_BASE_URL:-https://api.openai.com}"
+  OPENAI_VISION_API_KEY: "${OPENAI_VISION_API_KEY:-}"
+  OPENAI_VISION_MODEL: "${OPENAI_VISION_MODEL:-gpt-4.1}"
+  OPENAI_VISION_TIMEOUT_SECONDS: "${OPENAI_VISION_TIMEOUT_SECONDS:-40}"
+  OPENAI_VISION_DETAIL: "${OPENAI_VISION_DETAIL:-high}"
+  OPENAI_REALTIME_BASE_URL: "${OPENAI_REALTIME_BASE_URL:-https://api.openai.com}"
+  OPENAI_REALTIME_API_KEY: "${OPENAI_REALTIME_API_KEY:-}"
+  OPENAI_REALTIME_TRANSCRIPTION_MODEL: "${OPENAI_REALTIME_TRANSCRIPTION_MODEL:-gpt-4o-transcribe}"
+  REALTIME_PROVIDER: "${REALTIME_PROVIDER:-openai}"
+  BAILIAN_ASR_WORKSPACE_ID: "${BAILIAN_ASR_WORKSPACE_ID:-}"
+  BAILIAN_ASR_API_KEY: "${BAILIAN_ASR_API_KEY:-}"
+  BAILIAN_ASR_MODEL: "${BAILIAN_ASR_MODEL:-qwen-audio-3.0-asr-flash-streaming}"
+  BAILIAN_ASR_HOTWORDS: "${BAILIAN_ASR_HOTWORDS:-}"
+  BAILIAN_ASR_VOCABULARY_ID: "${BAILIAN_ASR_VOCABULARY_ID:-}"
+  VOLCENGINE_ASR_APP_KEY: "${VOLCENGINE_ASR_APP_KEY:-}"
+  VOLCENGINE_ASR_RESOURCE_ID: "${VOLCENGINE_ASR_RESOURCE_ID:-volc.seedasr.sauc.duration}"
+  VOLCENGINE_ASR_REQUEST_URL: "${VOLCENGINE_ASR_REQUEST_URL:-wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async}"
+  REALTIME_PROXY_TICKET_REDIS_URL: "${REALTIME_PROXY_TICKET_REDIS_URL:-redis://redis:6379/0}"
+  REALTIME_PROXY_TICKET_ALLOW_MEMORY: "${REALTIME_PROXY_TICKET_ALLOW_MEMORY:-false}"
+  RAG_CHUNK_SIZE: "${RAG_CHUNK_SIZE:-700}"
+  RAG_CHUNK_OVERLAP: "${RAG_CHUNK_OVERLAP:-70}"
+  RAG_MAX_FILE_SIZE_MB: "${RAG_MAX_FILE_SIZE_MB:-10}"
+  RAG_OBJECT_STORAGE_ENDPOINT: "${RAG_OBJECT_STORAGE_ENDPOINT:-http://minio:9000}"
+  RAG_OBJECT_STORAGE_BUCKET: "${RAG_OBJECT_STORAGE_BUCKET:-resume-builder-rag}"
+  RAG_OBJECT_STORAGE_ACCESS_KEY: "${RAG_OBJECT_STORAGE_ACCESS_KEY:?RAG_OBJECT_STORAGE_ACCESS_KEY must be set}"
+  RAG_OBJECT_STORAGE_SECRET_KEY: "${RAG_OBJECT_STORAGE_SECRET_KEY:?RAG_OBJECT_STORAGE_SECRET_KEY must be set}"
+  RAG_OBJECT_STORAGE_REGION: "${RAG_OBJECT_STORAGE_REGION:-us-east-1}"
+  RAG_IMAGE_ENRICHMENT_REDIS_URL: "${RAG_IMAGE_ENRICHMENT_REDIS_URL:-redis://redis:6379/0}"
+  RAG_IMAGE_ENRICHMENT_CONCURRENCY: "${RAG_IMAGE_ENRICHMENT_CONCURRENCY:-3}"
+  AUTOGEN_ENABLED: "${AUTOGEN_ENABLED:-false}"
+
+services:
+  resume-builder:
+    profiles:
+      - frontend-only
+      - python-ai
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: "${NODE_IMAGE:-node:22-alpine}"
+        NGINX_IMAGE: "${NGINX_IMAGE:-nginx:alpine}"
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    restart: unless-stopped
+    container_name: resume-builder
+    networks:
+      - resume-builder-network
+
+  mysql:
+    profiles:
+      - python-ai
+    image: "${MYSQL_IMAGE:-mysql:8.4}"
+    container_name: resume-builder-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-resume-builder}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-root}"
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - resume-builder-network
+
+  redis:
+    profiles:
+      - python-ai
+    image: "${REDIS_IMAGE:-redis:7-alpine}"
+    container_name: resume-builder-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - resume-builder-network
+
+  minio:
+    profiles:
+      - python-ai
+    image: "${MINIO_IMAGE:-minio/minio:RELEASE.2024-12-18T13-15-44Z}"
+    container_name: resume-builder-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}"
+      TZ: Asia/Shanghai
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - minio_data:/data
+    networks:
+      - resume-builder-network
+
+  minio-init:
+    profiles:
+      - python-ai
+    image: "${MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-11-21T17-21-54Z}"
+    container_name: resume-builder-minio-init
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}"
+      MINIO_APP_ACCESS_KEY: "${RAG_OBJECT_STORAGE_ACCESS_KEY:?RAG_OBJECT_STORAGE_ACCESS_KEY must be set}"
+      MINIO_APP_SECRET_KEY: "${RAG_OBJECT_STORAGE_SECRET_KEY:?RAG_OBJECT_STORAGE_SECRET_KEY must be set}"
+      MINIO_BUCKET: "${RAG_OBJECT_STORAGE_BUCKET:-resume-builder-rag}"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+         set -eu
+         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+         if [ "$${MINIO_APP_ACCESS_KEY}" = "$${MINIO_ROOT_USER}" ]; then
+           echo "MinIO 应用账号不能使用 Root 账号" >&2
+           exit 1
+         fi
+         mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+         mc anonymous set none "local/$${MINIO_BUCKET}"
+         cat > /tmp/rag-documents-policy.json <<EOF
+         {
+           "Version": "2012-10-17",
+           "Statement": [
+             {
+               "Effect": "Allow",
+               "Action": ["s3:ListBucket"],
+               "Resource": ["arn:aws:s3:::$${MINIO_BUCKET}"]
+             },
+             {
+               "Effect": "Allow",
+               "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+               "Resource": ["arn:aws:s3:::$${MINIO_BUCKET}/*"]
+             }
+           ]
+         }
+         EOF
+         if mc admin user info local "$${MINIO_APP_ACCESS_KEY}" >/dev/null 2>&1; then
+           mc admin user remove local "$${MINIO_APP_ACCESS_KEY}"
+         fi
+         mc admin user add local "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}"
+         mc admin policy remove local rag-documents-app >/dev/null 2>&1 || true
+         mc admin policy create local rag-documents-app /tmp/rag-documents-policy.json
+         mc admin policy attach local rag-documents-app --user "$${MINIO_APP_ACCESS_KEY}"
+    networks:
+      - resume-builder-network
+
+  pgvector:
+    profiles:
+      - "${PGVECTOR_PROFILE_PYTHON_AI:-python-ai}"
+    image: "${PGVECTOR_IMAGE:-pgvector/pgvector:pg17}"
+    container_name: resume-builder-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-resume-builder}"
+      POSTGRES_USER: "${POSTGRES_USER:-pgvector}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-pgvector}"
+      TZ: Asia/Shanghai
+    ports:
+      - "${PGVECTOR_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    networks:
+      - resume-builder-network
+
+  flyway-mysql:
+    <<: *flyway-common
+    environment:
+      FLYWAY_URL: "${FLYWAY_MYSQL_URL:-jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-resume-builder}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}"
+      FLYWAY_USER: "${FLYWAY_MYSQL_USER:-root}"
+      FLYWAY_PASSWORD: "${FLYWAY_MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-root}}"
+      FLYWAY_LOCATIONS: "filesystem:/flyway/sql"
+      FLYWAY_BASELINE_ON_MIGRATE: "${FLYWAY_BASELINE_ON_MIGRATE:-true}"
+      FLYWAY_BASELINE_VERSION: "${FLYWAY_BASELINE_VERSION:-0}"
+      FLYWAY_CONNECT_RETRIES: "${FLYWAY_CONNECT_RETRIES:-60}"
+      FLYWAY_LOCK_RETRY_COUNT: "${FLYWAY_LOCK_RETRY_COUNT:-50}"
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_FAIL_ON_MISSING_LOCATIONS: "true"
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+    volumes:
+      - ./sql/migrations/mysql:/flyway/sql:ro
+    command:
+      - migrate
+
+  flyway-pgvector:
+    <<: *flyway-common
+    environment:
+      FLYWAY_URL: "${FLYWAY_POSTGRES_URL:-jdbc:postgresql://pgvector:5432/${POSTGRES_DB:-resume-builder}}"
+      FLYWAY_USER: "${FLYWAY_POSTGRES_USER:-${POSTGRES_USER:-pgvector}}"
+      FLYWAY_PASSWORD: "${FLYWAY_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-pgvector}}"
+      FLYWAY_LOCATIONS: "filesystem:/flyway/sql"
+      FLYWAY_BASELINE_ON_MIGRATE: "${FLYWAY_BASELINE_ON_MIGRATE:-true}"
+      FLYWAY_BASELINE_VERSION: "${FLYWAY_BASELINE_VERSION:-0}"
+      FLYWAY_CONNECT_RETRIES: "${FLYWAY_CONNECT_RETRIES:-60}"
+      FLYWAY_LOCK_RETRY_COUNT: "${FLYWAY_LOCK_RETRY_COUNT:-50}"
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_FAIL_ON_MISSING_LOCATIONS: "true"
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+    volumes:
+      - ./sql/migrations/postgresql:/flyway/sql:ro
+    command:
+      - migrate
+
+  python-ai-backend:
+    profiles:
+      - python-ai
+    build:
+      context: ./python-ai-backend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_IMAGE: "${PYTHON_IMAGE:-python:3.11-slim}"
+        INSTALL_OPTIONAL_AI_DEPS: "${INSTALL_PYTHON_OPTIONAL_AI_DEPS:-true}"
+    container_name: resume-builder-python-ai-backend
+    restart: unless-stopped
+    environment:
+      <<: *common-ai-env
+      SERVER_PORT: "${SERVER_PORT:-8999}"
+      APP_CORS_ALLOWED_ORIGINS: "${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}"
+      MYSQL_DATASOURCE_URL: "${PYTHON_MYSQL_DATASOURCE_URL:-mysql+pymysql://root:root@mysql:3306/resume-builder}"
+      MYSQL_DATASOURCE_USERNAME: "${MYSQL_DATASOURCE_USERNAME:-root}"
+      MYSQL_DATASOURCE_PASSWORD: "${MYSQL_DATASOURCE_PASSWORD:-root}"
+      PGVECTOR_DATASOURCE_URL: "${PYTHON_PGVECTOR_DATASOURCE_URL:-postgresql+psycopg://pgvector:pgvector@pgvector:5432/resume-builder}"
+      PGVECTOR_DATASOURCE_USERNAME: "${PGVECTOR_DATASOURCE_USERNAME:-pgvector}"
+      PGVECTOR_DATASOURCE_PASSWORD: "${PGVECTOR_DATASOURCE_PASSWORD:-pgvector}"
+      PGVECTOR_CONNECT_TIMEOUT_SECONDS: "${PGVECTOR_CONNECT_TIMEOUT_SECONDS:-8}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgvector:
+        condition: service_healthy
+        required: false
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "${BACKEND_PORT:-8999}:8999"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('SERVER_PORT', '8999'), timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      resume-builder-network:
+        aliases:
+          - backend
+
+  python-ai-image-worker:
+    profiles:
+      - python-ai
+    build:
+      context: ./python-ai-backend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_IMAGE: "${PYTHON_IMAGE:-python:3.11-slim}"
+        INSTALL_OPTIONAL_AI_DEPS: "${INSTALL_PYTHON_OPTIONAL_AI_DEPS:-true}"
+    container_name: resume-builder-python-ai-image-worker
+    restart: unless-stopped
+    environment:
+      <<: *common-ai-env
+      SERVER_PORT: "8999"
+      APP_CORS_ALLOWED_ORIGINS: "${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}"
+      MYSQL_DATASOURCE_URL: "${PYTHON_MYSQL_DATASOURCE_URL:-mysql+pymysql://root:root@mysql:3306/resume-builder}"
+      MYSQL_DATASOURCE_USERNAME: "${MYSQL_DATASOURCE_USERNAME:-root}"
+      MYSQL_DATASOURCE_PASSWORD: "${MYSQL_DATASOURCE_PASSWORD:-root}"
+      PGVECTOR_DATASOURCE_URL: "${PYTHON_PGVECTOR_DATASOURCE_URL:-postgresql+psycopg://pgvector:pgvector@pgvector:5432/resume-builder}"
+      PGVECTOR_DATASOURCE_USERNAME: "${PGVECTOR_DATASOURCE_USERNAME:-pgvector}"
+      PGVECTOR_DATASOURCE_PASSWORD: "${PGVECTOR_DATASOURCE_PASSWORD:-pgvector}"
+      PGVECTOR_CONNECT_TIMEOUT_SECONDS: "${PGVECTOR_CONNECT_TIMEOUT_SECONDS:-8}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgvector:
+        condition: service_healthy
+        required: false
+      minio-init:
+        condition: service_completed_successfully
+    # 图片 Worker 不提供 HTTP 健康端点，避免复用后端镜像检查导致误报。
+    healthcheck:
+      disable: true
+    command: ["python", "-m", "app.worker_main"]
+    networks:
+      - resume-builder-network
+
+networks:
+  resume-builder-network:
+    name: resume-builder-network
+
+volumes:
+  mysql_data:
+  pgvector_data:
+  minio_data:

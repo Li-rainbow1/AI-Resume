@@ -1,0 +1,138 @@
+<mapper>
+  <statement id="query0"><![CDATA[
+SELECT user_id, context_version FROM interview_sessions WHERE session_id = %s FOR UPDATE
+  ]]></statement>
+  <statement id="query1"><![CDATA[
+INSERT INTO interview_sessions (
+                        session_id,
+                        user_id,
+                        mode,
+                        status,
+                        duration_minutes,
+                        elapsed_seconds,
+                        memory_summary,
+                        summary_through_seq,
+                        context_version,
+                        last_request_id,
+                        last_response_json,
+                        completed_request_ids_json,
+                        final_evaluation_json,
+                        resume_snapshot_json,
+                        total_score,
+                        passed,
+                        created_at,
+                        updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        user_id = VALUES(user_id),
+                        mode = VALUES(mode),
+                        status = VALUES(status),
+                        duration_minutes = VALUES(duration_minutes),
+                        elapsed_seconds = VALUES(elapsed_seconds),
+                        memory_summary = VALUES(memory_summary),
+                        summary_through_seq = VALUES(summary_through_seq),
+                        context_version = VALUES(context_version),
+                        last_request_id = VALUES(last_request_id),
+                        last_response_json = VALUES(last_response_json),
+                        completed_request_ids_json = VALUES(completed_request_ids_json),
+                        final_evaluation_json = VALUES(final_evaluation_json),
+                        resume_snapshot_json = VALUES(resume_snapshot_json),
+                        total_score = VALUES(total_score),
+                        passed = VALUES(passed),
+                        updated_at = VALUES(updated_at)
+  ]]></statement>
+  <statement id="insertSession"><![CDATA[
+INSERT INTO interview_sessions (
+                        session_id,
+                        user_id,
+                        mode,
+                        status,
+                        duration_minutes,
+                        elapsed_seconds,
+                        memory_summary,
+                        summary_through_seq,
+                        context_version,
+                        last_request_id,
+                        last_response_json,
+                        completed_request_ids_json,
+                        final_evaluation_json,
+                        resume_snapshot_json,
+                        total_score,
+                        passed,
+                        created_at,
+                        updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+  ]]></statement>
+  <statement id="query3"><![CDATA[
+DELETE FROM interview_session_messages WHERE session_id = %s
+  ]]></statement>
+  <statement id="query4"><![CDATA[
+INSERT INTO interview_session_messages (
+                            session_id,
+                            seq_no,
+                            role,
+                            content,
+                            score,
+                            score_comment,
+                            created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+  ]]></statement>
+  <statement id="query5"><![CDATA[
+SELECT
+                        session_id,
+                        user_id,
+                        mode,
+                        status,
+                        duration_minutes,
+                        elapsed_seconds,
+                        memory_summary,
+                        summary_through_seq,
+                        context_version,
+                        last_request_id,
+                        last_response_json,
+                        completed_request_ids_json,
+                        final_evaluation_json,
+                        resume_snapshot_json,
+                        created_at,
+                        updated_at
+                    FROM interview_sessions
+                    WHERE user_id = %s
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+  ]]></statement>
+  <statement id="query6"><![CDATA[
+SELECT
+                        session_id,
+                        user_id,
+                        mode,
+                        status,
+                        duration_minutes,
+                        elapsed_seconds,
+                        memory_summary,
+                        summary_through_seq,
+                        context_version,
+                        last_request_id,
+                        last_response_json,
+                        completed_request_ids_json,
+                        final_evaluation_json,
+                        resume_snapshot_json,
+                        created_at,
+                        updated_at
+                    FROM interview_sessions
+                    WHERE session_id = %s AND user_id = %s
+                    LIMIT 1
+  ]]></statement>
+  <statement id="query7"><![CDATA[
+SELECT
+                    session_id,
+                    seq_no,
+                    role,
+                    content,
+                    score,
+                    score_comment,
+                    created_at
+                FROM interview_session_messages
+                WHERE session_id IN ({placeholders})
+                ORDER BY session_id ASC, seq_no ASC
+  ]]></statement>
+</mapper>
