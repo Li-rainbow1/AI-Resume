@@ -7,6 +7,8 @@ __pycache__/
 htmlcov/
 .ruff_cache/
 .mypy_cache/
+# DeepEval 在本地生成的运行缓存与日志，不含需要入库的产物
+.deepeval/
 .env
 .env.test
 # refresh_real_model_env.py 会为 .env.test 生成含真实密钥的备份，必须一并忽略
