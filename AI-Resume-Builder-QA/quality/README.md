@@ -1,3 +1,5 @@
+> 当前确定性评分已切换为 evidence-v3：17 道按精确证据计分，3 道无答案题为 N/A。具体定义见 ../testdata/quality/README.md。下文旧版本的文档归属评分及无答案门禁描述仅供历史参考；本次不运行 DeepEval，不使用来源拼接证明生成质量。
+
 # AI/RAG 质量评测
 
 ## 当前状态
@@ -48,7 +50,7 @@ HTTP 200 只表示请求成功。**三项确定性指标只消费 `sources` 与�
 - **分母固定为 `top_k`**，不是实际返回条数。检索返回不足 K 条时如实扣分，不掩盖召回不足——语料 Chunk 总数小于 `top_k` 的题会因此天然拿不到满分。
 - **判据只比文档归属、不看位置**：调用 `source_matches` 时不传 `location`，所以「来源位置错误」不会拉低 Precision@K。它与 `Recall@K` 的分工是「找对文档」与「找对位置」。
 - **门禁是 `> 0`，不是 `== 1`**：等价于「TopK 内至少命中一条预期文档来源」，也就是 Hit Rate@k 的 0/1 判定。不要求满分，是因为上一条分母规则会让「库内 Chunk 不够」的题天然达不到 1.00，那不属于检索质量问题。
-- 单文档语料下所有 Chunk 共享同一 `originalFilename`，该指标退化为恒值（召回非空时恒为 `返回条数 / top_k`）。现在语料含 3 篇干扰文档、共 21 个正文 Chunk，而 `top_k=5`——干扰来源进入 TopK 会直接拉低该指标，区分度由此成立。图片题的干扰来源不参与竞争，所以**该指标要按题型看**。
+- 单文档语料下所有 Chunk 共享同一 `originalFilename`，该指标退化为恒值（召回非空时恒为 `返回条数 / top_k`）。现在语料含 3 篇干扰文档、共 21 个正文 Chunk，而 `top_k=4`——干扰来源进入 TopK 会直接拉低该指标，区分度由此成立。图片题的干扰来源不参与竞争，所以**该指标要按题型看**。
 
 ### MRR 的两处口径说明
 
@@ -97,6 +99,10 @@ DeepEval 检索侧另有 `Contextual Precision`（相关 Chunk 是否排在前�
 
 固定 Judge 只从当前进程的 `DEEPEVAL_JUDGE_MODEL`、`DEEPEVAL_JUDGE_BASE_URL`、`DEEPEVAL_JUDGE_API_KEY` 读取。可选的 `DEEPEVAL_JUDGE_THRESHOLD` 控制阈值，`DEEPEVAL_JUDGE_REPEAT_COUNT` 控制同项重复评分；重复评分极差超过 0.2 会归类为“Judge评分波动”。这些变量不写入 `.env.test.example`、日志或报告。
 
+Judge 必须与待测 Chat 模型**异构**：同源同模型等于自评，分数会系统性偏乐观。写入由 `scripts/refresh_real_model_env.py --judge-model <模型名> --write` 完成，它会连同 `PERF_OPENAI_*` 一起刷新 `QA_RUN_DEEPEVAL=1`，并顺带用一次最小对话请求探测 Judge 端点（可达、密钥有效、模型名存在、正文非空）。实测组合：待测 `deepseek-flash` + Judge `qwen3.8-max`（同走 DashScope 兼容模式，复用业务 embedding 服务的端点与密钥，因为同一个账号密钥既能调 embedding 也能调对话模型）。
+
+未登记进 DeepEval 内置模型表的模型（Qwen 系即是）会走「普通对话 + 本地 JSON 解析」这条最兼容的路径——不向端点传 `response_format`，拿回正文后由 `trim_and_load_json` + pydantic 本地校验。因此**不要求端点支持 `response_format`**，代价是报告里的成本字段为 `None`（未知模型无价目表），不影响分数与判定。
+
 实现依据：[DeepEval 指标说明](https://deepeval.com/docs/metrics-introduction)、[Contextual Relevancy](https://deepeval.com/docs/metrics-contextual-relevancy)、[自定义 OpenAI-compatible 模型](https://deepeval.com/integrations/models/openai)。本项目锁定并按实际安装的 `deepeval==4.1.4` 接口适配。
 
 ## 执行
@@ -109,6 +115,8 @@ DeepEval 检索侧另有 `Contextual Precision`（相关 Chunk 是否排在前�
 ```
 
 `scripts/inspect_quality_corpus_chunks.py` 离线调用业务仓库的分片代码（`LogicalDocumentSplitterService` + `DocumentChunkingService`），打印每篇语料的 Chunk 数与数据集 `top_k` 分布。它只读代码和语料、不连接服务，用来确认干扰文档确实构成 TopK 竞争、以及 `top_k` 相对语料规模是否合理。**修改语料或分片参数后必须重跑**——`top_k` 停用旧值就是因为语料规模变了而它没有跟着变。
+
+真实模型端点与 Judge 凭据不手工维护：`scripts/refresh_real_model_env.py` 读业务仓库 `.env` 的根密钥解密业务 MySQL 的 `system_service_configs`，把 chat / embedding / vision 写给 `PERF_OPENAI_*`，并按需写入 `DEEPEVAL_JUDGE_*`。省略 `--judge-model` 时完全不碰 Judge 配置，`--write` 才落盘并自动备份（默认只预览、密钥只回显长度与尾 4 位）。写入 `PERF_*` 后要重建 `backend` 与 `image-worker`；`DEEPEVAL_*` 只在 pytest 进程内读取，不需要重建容器。
 
 真实基线还要求显式启用 `QA_RUN_RAG_QUALITY`、`QA_ALLOW_QUALITY_WRITES`、`QA_QUALITY_REAL_MODELS_CONFIRMED`、`QA_RUN_RAG_INTEGRATION`、`QA_ALLOW_RAG_WRITES`。DeepEval 另需启用 `QA_RUN_DEEPEVAL` 并在当前进程提供三项 Judge 环境变量。非 localhost 目标还需显式启用 `QA_ALLOW_REMOTE_QUALITY`。
 

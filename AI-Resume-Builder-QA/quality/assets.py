@@ -27,16 +27,17 @@ class QualityCorpus:
 
 
 class QualityAssetFactory:
-    def __init__(self, root: Path, run_id: str) -> None:
+    def __init__(self, root: Path, run_id: str, source_root: Path | None = None) -> None:
         self.root = root
         self.run_id = run_id
+        self.source_root = source_root
         self.root.mkdir(parents=True, exist_ok=True)
 
     def create(self) -> QualityCorpus:
         uid = uuid4().hex
         asset_dir = self.root / "assets"
         asset_dir.mkdir(parents=True, exist_ok=True)
-        source_root = Path(__file__).resolve().parents[1] / "testdata" / "quality" / "corpus"
+        source_root = self.source_root or Path(__file__).resolve().parents[1] / "testdata" / "quality" / "corpus"
         image_names = ("quality-ocr-badge.png", "quality-capacity-table.png", "quality-review-flow.png")
         # 固定图片像素，运行时只写入本轮元数据，避免系统字体差异改变评测素材。
         for image_name in image_names:

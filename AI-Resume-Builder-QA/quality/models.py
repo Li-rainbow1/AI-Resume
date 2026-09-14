@@ -13,6 +13,7 @@ class GoldenCase:
     forbidden_facts: list[str]
     question_type: str
     top_k: int
+    evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -24,6 +25,8 @@ class CaseResult:
     sources: list[dict[str, Any]]
     deterministic_metrics: dict[str, float | None]
     deepeval_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
-    passed: bool = False
+    passed: bool | None = False
+    evaluation_status: str = "failed"
+    evidence_matches: dict[str, Any] = field(default_factory=dict)
     failure_reasons: list[str] = field(default_factory=list)
     bad_case_categories: list[str] = field(default_factory=list)

@@ -7,16 +7,18 @@ from typing import Any
 from quality.models import CaseResult
 
 
-def _aggregate_judge_metric(results: list[CaseResult], name: str) -> dict[str, float | int]:
-    values = [result.deepeval_metrics[name] for result in results if name in result.deepeval_metrics]
-    if not values:
-        return {"mean_score": 0.0, "pass_rate": 0.0, "evaluated_count": 0}
+def _aggregate_judge_metric(results: list[CaseResult], name: str) -> dict[str, float | int | None]:
+    # 通过率只统计已取得评分的适用题；缺失评分计入完成率，不混入质量通过率。
+    applicable = [result for result in results if result.evaluation_status != "not_applicable"]
+    values = [result.deepeval_metrics[name] for result in applicable if name in result.deepeval_metrics]
     return {
-        "mean_score": sum(float(value.get("score") or 0.0) for value in values) / len(values),
-        "pass_rate": sum(bool(value.get("passed")) for value in values) / len(results),
+        "mean_score": sum(float(value.get("score") or 0.0) for value in values) / len(values) if values else None,
+        "pass_rate": sum(bool(value.get("passed")) for value in values) / len(values) if values else None,
         "evaluated_count": len(values),
+        "applicable_count": len(applicable),
+        "missing_count": len(applicable) - len(values),
+        "completion_rate": len(values) / len(applicable) if applicable else None,
     }
-
 
 def write_reports(
     results: list[CaseResult],
@@ -34,7 +36,7 @@ def write_reports(
             stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
     metric_names = sorted({name for result in results for name in result.deterministic_metrics})
     judge_names = sorted({name for result in results for name in result.deepeval_metrics})
-    columns = ["case_id", "passed", "failure_reasons", "bad_case_categories", *metric_names, *judge_names]
+    columns = ["case_id", "evaluation_status", "passed", "failure_reasons", "bad_case_categories", *metric_names, *judge_names]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
@@ -42,6 +44,7 @@ def write_reports(
             row: dict[str, Any] = {
                 "case_id": result.case_id,
                 "passed": result.passed,
+                "evaluation_status": result.evaluation_status,
                 "failure_reasons": "；".join(result.failure_reasons),
                 "bad_case_categories": "；".join(result.bad_case_categories),
                 **result.deterministic_metrics,
@@ -62,8 +65,11 @@ def write_reports(
     summary = {
         "run_id": run_id,
         "case_count": len(results),
-        "passed_count": sum(result.passed for result in results),
-        "failed_count": sum(not result.passed for result in results),
+        "run_status": "completed" if len(results) == config_summary.get("expected_case_count", len(results)) else "partial",
+        "passed_count": sum(result.passed is True for result in results),
+        "failed_count": sum(result.passed is False for result in results),
+        "not_applicable_count": sum(result.evaluation_status == "not_applicable" for result in results),
+        "evaluated_count": sum(result.evaluation_status != "not_applicable" for result in results),
         "aggregate": aggregate,
         "aggregate_evaluated_count": aggregate_evaluated_count,
         "deepeval_aggregate": deepeval_aggregate,

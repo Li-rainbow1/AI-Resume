@@ -4,6 +4,22 @@ from typing import Any
 from quality.models import GoldenCase
 
 
+SCORING_VERSION = "evidence-v3.2"
+
+
+def normalize_evidence_content(value: object) -> str:
+    """保留表格行列边界，仅消除已知节点名称的等义中文注释。"""
+    content = str(value or "").lower()
+    content = re.sub(r"\t+", "|", content)
+    labels = {"intake": "受理", "review": "审核", "approve": "批准",
+              "archive": "归档", "reject": "驳回", "revise": "修订",
+              "receive": "接收", "check": "检查", "accept": "接受",
+              "store": "存储", "fix": "修复"}
+    for node, label in labels.items():
+        content = re.sub(rf"\b{node}\s*[（(]\s*{label}\s*[）)]", node, content)
+    return re.sub(r"[ \r\f\v*`]+", "", content)
+
+
 def normalize_text(value: object) -> str:
     return re.sub(r"\s+|[，。！？、；：,.!?;:\-_/]", "", str(value or "")).lower()
 
@@ -19,65 +35,73 @@ def source_matches(source: dict[str, Any], expected_document: str, location: dic
         candidates = [metadata.get(key)]
         if key == "imageLocator":
             candidates = [metadata.get("imageSourceLocator"), metadata.get("relativePath")]
-        if not any(str(expected) in str(candidate or "") for candidate in candidates):
+        if key == "imageLocator":
+            matched = any(str(candidate or "").replace("\\", "/").rsplit("/", 1)[-1] == str(expected) for candidate in candidates)
+        else:
+            matched = any(str(candidate) == str(expected) for candidate in candidates)
+        if not matched:
             return False
     return True
 
 
-def recall_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+def evidence_details(case: GoldenCase, sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """按事实子项匹配原始前 K 位；重复项占排名但不重复得分，允许跨片段覆盖证据。"""
     if case.question_type == "no_answer":
-        return None
-    expected = case.expected_source_location
-    hits = sum(any(source_matches(source, case.expected_document, location) for source in sources[: case.top_k]) for location in expected)
-    return hits / len(expected) if expected else 0.0
-
-
-def precision_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
-    """Precision@K：TopK 结果中属于预期文档的来源占比，分母固定为 `top_k`。
-
-    分母取 `top_k` 而非实际返回条数，是为了对齐业界标准口径——检索返回不足 K 条时
-    （语料 Chunk 总数小于 top_k）如实扣分，不掩盖召回不足。`dataset.py` 已强制校验
-    `1 <= top_k <= 5`，因此分母不会为零。
-
-    无答案题不适用，返回 None 以免稀释汇总均值。单项是否判失败由 `runner.py` 的
-    `> 0` 门禁决定，该条件等价于「TopK 内至少命中一条预期文档来源」。
-    """
-    if case.question_type == "no_answer":
-        return None
-    considered = sources[: case.top_k]
-    relevant = sum(source_matches(source, case.expected_document) for source in considered)
-    return relevant / case.top_k
-
-
-def mrr(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
-    """单条 MRR 贡献：首个命中预期来源的排名倒数（rank 1 → 1.0、rank 3 → 0.33）。
-
-    相关性判据与 Recall@K 完全一致——命中任一 `expected_source_location` 即相关，复用
-    `source_matches`，因此 MRR 不需要新增任何标注。`summary.json` 对各题取算术平均即为
-    MRR。它补的是 Recall@K 缺的「排序」维度：来源都在 TopK 内时 Recall@K 恒为 1，而
-    MRR 会因正确来源排在后面而下降。
-
-    无答案题不适用，返回 None 以免稀释汇总均值。
-    """
-    if case.question_type == "no_answer":
-        return None
-    for rank, source in enumerate(sources[: case.top_k], start=1):
-        if any(
-            source_matches(source, case.expected_document, location)
-            for location in case.expected_source_location
-        ):
-            return 1.0 / rank
-    return 0.0
+        return {"status": "not_applicable", "sources": [], "units": {}}
+    if not case.evidence:
+        raise ValueError("有答案题必须加载精确证据，禁止退回文档级评分")
+    covered = {key: set() for key in case.evidence}
+    seen_contents: set[str] = set()
+    details = []
+    for rank, source in enumerate(sources[:case.top_k], 1):
+        content = normalize_evidence_content(source.get("content"))
+        source_id = str(source.get("sourceId") or source.get("source_id") or "")
+        # sourceId 标识逻辑文档，多张图片或多个分片可能共用；不能据此丢弃不同内容。
+        duplicate = bool(content and content in seen_contents)
+        if content:
+            seen_contents.add(content)
+        matches = {}
+        if not duplicate:
+            for key, unit in case.evidence.items():
+                location = ({"imageLocator": unit["asset"].rsplit("/", 1)[-1]}
+                            if unit["kind"] == "image" else {"ingestSource": "text_document"})
+                if not source_matches(source, case.expected_document, location):
+                    continue
+                hits = [index for index, alternatives in enumerate(unit["match_patterns"])
+                        if any(re.search(pattern, content) for pattern in alternatives)]
+                if hits:
+                    covered[key].update(hits)
+                    matches[key] = hits
+        details.append({"rank": rank, "source_id": source_id, "duplicate": duplicate,
+                        "matched_parts": matches, "relevant": bool(matches)})
+    return {"status": "evaluated", "sources": details,
+            "units": {key: {"matched_parts": sorted(parts),
+                            "required_parts": len(case.evidence[key]["match_patterns"]),
+                            "covered": len(parts) == len(case.evidence[key]["match_patterns"])}
+                      for key, parts in covered.items()}}
 
 
 def evaluate_case(case: GoldenCase, answer: str, sources: list[dict[str, Any]]) -> dict[str, float | None]:
-    """三项确定性指标全部在检索侧：只读 sources 与数据集标注，不读模型回答。
-
-    `answer` 仍保留在签名里，但当前没有任何指标消费它——加入生成侧检查时它才是入口。
-    回答质量目前完全由 DeepEval 的四项指标承担。
-    """
+    """Recall 为证据单元覆盖率；Precision 为相关片段数/K；MRR 为首个事实命中排名倒数。"""
+    detail = evidence_details(case, sources)
+    if detail["status"] == "not_applicable":
+        return {"recall_at_k": None, "precision_at_k": None, "mrr": None}
+    units = detail["units"]
+    relevant = [row for row in detail["sources"] if row["relevant"]]
     return {
-        "recall_at_k": recall_at_k(case, sources),
-        "precision_at_k": precision_at_k(case, sources),
-        "mrr": mrr(case, sources),
+        "recall_at_k": sum(unit["covered"] for unit in units.values()) / len(units),
+        "precision_at_k": len(relevant) / case.top_k,
+        "mrr": 1.0 / relevant[0]["rank"] if relevant else 0.0,
     }
+
+
+def recall_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+    return evaluate_case(case, "", sources)["recall_at_k"]
+
+
+def precision_at_k(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+    return evaluate_case(case, "", sources)["precision_at_k"]
+
+
+def mrr(case: GoldenCase, sources: list[dict[str, Any]]) -> float | None:
+    return evaluate_case(case, "", sources)["mrr"]
