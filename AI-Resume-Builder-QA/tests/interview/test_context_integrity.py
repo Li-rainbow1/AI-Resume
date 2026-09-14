@@ -18,13 +18,13 @@ from app.domain.services.interview_context_service import (
 )
 from app.application.dto.interview_dto import InterviewTurnRequestDto
 from app.application.services.interview_session_service import persist_turn_result
-_LLM_MODULE_PATH = BUSINESS_BACKEND / "app" / "infrastructure" / "llm" / "langchain_client.py"
-_LLM_SPEC = importlib.util.spec_from_file_location("qa_langchain_client", _LLM_MODULE_PATH)
+_LLM_MODULE_PATH = BUSINESS_BACKEND / "app" / "infrastructure" / "llm" / "openai_chat_client.py"
+_LLM_SPEC = importlib.util.spec_from_file_location("qa_openai_chat_client", _LLM_MODULE_PATH)
 if _LLM_SPEC is None or _LLM_SPEC.loader is None:
     raise RuntimeError("无法加载模型客户端源码")
-langchain_client = importlib.util.module_from_spec(_LLM_SPEC)
-_LLM_SPEC.loader.exec_module(langchain_client)
-LangChainClient = langchain_client.LangChainClient
+openai_chat_client = importlib.util.module_from_spec(_LLM_SPEC)
+_LLM_SPEC.loader.exec_module(openai_chat_client)
+OpenAIChatClient = openai_chat_client.OpenAIChatClient
 
 
 def _history(pair_count: int = 6) -> list[dict[str, str]]:
@@ -269,12 +269,12 @@ def _stream_lines(*, finish_reason: str | None = "stop", done: bool = True) -> l
 
 
 def test_stream_requires_done_and_rejects_length_finish(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = LangChainClient("mock", "http://mock", "key")
-    monkeypatch.setattr(langchain_client.urllib.request, "urlopen", lambda *_args, **_kwargs: _StreamResponse(_stream_lines()))
+    client = OpenAIChatClient("mock", "http://mock", "key")
+    monkeypatch.setattr(openai_chat_client.urllib.request, "urlopen", lambda *_args, **_kwargs: _StreamResponse(_stream_lines()))
     assert "assistantReply" in "".join(client.stream_chat("测试"))
 
     monkeypatch.setattr(
-        langchain_client.urllib.request,
+        openai_chat_client.urllib.request,
         "urlopen",
         lambda *_args, **_kwargs: _StreamResponse(_stream_lines(finish_reason="length")),
     )
@@ -282,7 +282,7 @@ def test_stream_requires_done_and_rejects_length_finish(monkeypatch: pytest.Monk
         list(client.stream_chat("测试"))
 
     monkeypatch.setattr(
-        langchain_client.urllib.request,
+        openai_chat_client.urllib.request,
         "urlopen",
         lambda *_args, **_kwargs: _StreamResponse(_stream_lines(done=False)),
     )

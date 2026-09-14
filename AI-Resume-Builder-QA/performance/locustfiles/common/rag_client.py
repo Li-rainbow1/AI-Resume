@@ -88,7 +88,7 @@ def poll_image_parsing(client, document_id: str, timeout_seconds: float, interva
 
 
 def query_rag(client, question: str, expected_document_id: str | None = None):
-    with client.post("/api/ai/rag/query", json={"query": question, "topK": 5}, name="/api/ai/rag/query", catch_response=True) as response:
+    with client.post("/api/ai/rag/query", json={"query": question, "topK": 4}, name="/api/ai/rag/query", catch_response=True) as response:
         if response.status_code != 200:
             response.failure(f"RAG 查询 HTTP {response.status_code}")
             return None

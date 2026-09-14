@@ -70,7 +70,7 @@ class RagClient:
                 raise TimeoutError(f"图片增强轮询超过 {timeout_seconds:.0f} 秒")
             await asyncio.sleep(interval_seconds)
 
-    async def query(self, query: str, top_k: int = 5) -> dict[str, Any]:
+    async def query(self, query: str, top_k: int = 4) -> dict[str, Any]:
         response = await self._client.post("/api/ai/rag/query", json={"query": query, "topK": top_k})
         response.raise_for_status()
         return response.json()
