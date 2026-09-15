@@ -22,6 +22,28 @@
 - **RAG 知识库**：上传文档或图片，经 OCR、结构化切块与 Embedding 后写入 pgvector；支持知识库分组、文档归档与面试会话的检索范围限定。
 - **系统服务配置中心**：管理员在网页配置 AI 与邮件服务，密钥使用 AES-GCM 加密后入库。
 
+## 界面预览
+
+### 简历编辑
+
+![简历编辑](readme-images/resume-editor.png)
+
+### AI 面试
+
+![AI 面试](readme-images/ai-interview.png)
+
+### 知识库上传
+
+![知识库上传](readme-images/knowledge-base-upload.png)
+
+### 系统服务配置
+
+![系统服务配置](readme-images/system-service-config.png)
+
+### 文档库管理
+
+![文档库管理](readme-images/document-library.png)
+
 ## 技术栈
 
 | 层次 | 技术 |
