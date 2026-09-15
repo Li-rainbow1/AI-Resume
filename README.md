@@ -13,24 +13,48 @@
 
 ## 仓库内容
 
-| 目录 | 内容 | 文档 |
-| --- | --- | --- |
-| [`AI-Resume-Builder/`](AI-Resume-Builder/) | 业务实现：Vue 3 前端、Python AI 后端、数据库迁移 | [业务 README](AI-Resume-Builder/README.md) |
+| 目录                                               | 内容                                      | 文档                                          |
+| ------------------------------------------------ | --------------------------------------- | ------------------------------------------- |
+| [`AI-Resume-Builder/`](AI-Resume-Builder/)       | 业务实现：Vue 3 前端、Python AI 后端、数据库迁移        | [业务 README](AI-Resume-Builder/README.md)    |
 | [`AI-Resume-Builder-QA/`](AI-Resume-Builder-QA/) | 质量保障：接口自动化、Mock AI 契约、面试流式边界、UI 场景、性能对比 | [QA README](AI-Resume-Builder-QA/README.md) |
 
 两者原为各自独立的仓库，合并进本仓库时各自的提交历史完整保留，各带一层子目录。
 
 ## 核心结果
 
-图片解析链路由**同步串行**改为**异步并发**，同一台机器、同一批语料、各 10 次正式样本的对照：
+图片解析链路由**同步串行**改为**异步并发**（Worker 并发 3），同机同语料、真实模型对照。运行条件：Windows 11 / 12 逻辑 CPU；输入为内嵌 5 图的固定 PDF（`imageSha256` 两组一致，排除输入漂移）；vision 模型 `deepseek-flash`；每组 10 个正式样本（另有 2 个预热样本，不计入统计）。
 
-| 指标 | 同步串行 | 异步并发 | 变化 |
-| --- | --- | --- | --- |
-| 上传至解析完成（均值） | 34.78 秒 | 15.76 秒 | −54.7% |
-| 上传至解析完成（中位数） | 32.33 秒 | 14.61 秒 | — |
-| 解析吞吐 | 8.06 张/分钟 | 16.47 张/分钟 | +104.5% |
+| 指标                                      | 同步串行      | 异步并发       | 变化          |
+| --------------------------------------- | --------- | ---------- | ----------- |
+| 上传至解析完成 · 均值 `total_to_image_parsed_ms` | 34.78 秒   | 15.76 秒    | **−54.7%**  |
+| 上传至解析完成 · 中位数                           | 32.33 秒   | 14.61 秒    | −54.8%      |
+| 上传至解析完成 · P95                           | 52.25 秒   | 28.65 秒    | −45.2%      |
+| 解析吞吐 `imagesPerSecond`                  | 8.06 张/分钟 | 16.47 张/分钟 | **+104.5%** |
+| 等价平均单张耗时                                | 7.45 秒    | 3.64 秒     | −51.1%      |
+| 上传接口响应 · 均值 `upload_request_ms`         | 34.77 秒   | 0.52 秒     | 不可比         |
+| 上传接口响应 · 中位数                            | 32.33 秒   | 0.51 秒     | 不可比         |
+| 上传接口响应 · P95                            | 52.25 秒   | 0.56 秒     | 不可比         |
 
-50 张图片全部成功入库，数据库终态校验通过，失败 0。以上为单机单轮小样本对照，**不构成容量推断**；完整口径、原始报告与复现方式见 [QA 仓库](AI-Resume-Builder-QA/README.md)。
+正确性与完整性核验（两组均通过）：
+
+| 项                                         | 同步串行               | 异步并发               |
+| ----------------------------------------- | ------------------ | ------------------ |
+| 成功入库图片数                                   | 50                 | 50                 |
+| 数据库逐篇核验                                   | passed             | passed             |
+| 文档终态                                      | 12 篇全部 `completed` | 12 篇全部 `completed` |
+| 每篇 `indexedCount`                         | 均为 5               | 均为 5               |
+| `failedCount` / `duplicateChunkCount`     | 0 / 0              | 0 / 0              |
+| Locust 失败数 / 样本缺失数                        | 0 / 0              | 0 / 0              |
+| 异步队列峰值 `pendingPeak` / `streamLengthPeak` | 不适用（无队列）           | 1 / 1，收尾归零         |
+
+**口径说明（引用前必读）**
+
+- 正式对比口径是 `total_to_image_parsed_ms`。异步后「上传接口返回」只等到上传流 `batch-complete`，不再等图片处理完成，因此 `upload_request_ms` 的 34.77 → 0.52 秒**不是链路提速**；把它当降幅会得到「降低 98.5%」的错误结论，故表中标为「不可比」。
+- P95 采用最近秩定义，本轮每组 10 个样本，`ceil(10 × 0.95) = 10`，故上表 P95 **等于该组样本最大值**，不能作为长尾外推依据。
+- 「等价平均单张耗时」由测量时间窗推出（含样本间空档），与「总耗时均值」不是同一指标，两者不可互相换算（34.78 ÷ 5 = 6.96 ≠ 7.45）。吞吐原值为 0.134279 / 0.274556 张/秒。
+- 本轮为**单轮、单机、单语料、10 个正式样本**，只支持「同步串行 vs 异步并发 3」这一个维度的结论，**不构成生产容量推断**。
+
+原始报告、逐样本明细与复现命令：[`formal-ab-20260912a/VERIFICATION.md`](AI-Resume-Builder-QA/reports/performance/image-parser/formal-ab-20260912a/VERIFICATION.md) —— 含 `comparison.csv`、两组 `summary.json`、`samples.jsonl`、Locust 统计与队列采样。该轮是首轮完整通过「Locust 指标 + 数据库逐篇核验 + 清理校验」的正式对比，前三轮编排均失败（其中一轮为 async 组数据库校验口径过严，已按产品契约校正）。
 
 ## 系统结构
 
@@ -89,17 +113,17 @@ FastAPI AI 后端（api → application → domain → infrastructure 分层）
 
 ## 技术栈
 
-| 层次 | 技术 |
-| --- | --- |
-| 前端 | Vue 3、TypeScript、Pinia、Vite、Tailwind CSS |
-| AI 后端 | Python 3.11+、FastAPI、Uvicorn |
-| 业务数据库 | MySQL 8 |
-| 向量数据库 | PostgreSQL 17 + pgvector |
-| 缓存与队列 | Redis |
-| 对象存储 | MinIO |
-| 数据库迁移 | Flyway |
-| AI 能力 | OpenAI 兼容的 Chat、Embedding、Vision OCR、Realtime |
-| 质量保障 | pytest、httpx、pytest-playwright、Locust、DeepEval |
+| 层次    | 技术                                             |
+| ----- | ---------------------------------------------- |
+| 前端    | Vue 3、TypeScript、Pinia、Vite、Tailwind CSS       |
+| AI 后端 | Python 3.11+、FastAPI、Uvicorn                   |
+| 业务数据库 | MySQL 8                                        |
+| 向量数据库 | PostgreSQL 17 + pgvector                       |
+| 缓存与队列 | Redis                                          |
+| 对象存储  | MinIO                                          |
+| 数据库迁移 | Flyway                                         |
+| AI 能力 | OpenAI 兼容的 Chat、Embedding、Vision OCR、Realtime  |
+| 质量保障  | pytest、httpx、pytest-playwright、Locust、DeepEval |
 
 ## 快速开始
 
