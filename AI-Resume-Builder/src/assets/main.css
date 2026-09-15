@@ -1,7 +1,34 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 @import './theme.css';
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import './print.css';
+
+/* 自托管 Noto Sans SC（静态 TrueType 子集：ASCII + GB2312 汉字 + 常用中文标点）。
+   必须自托管：Google Fonts / 本机 OTF 版均为 CFF 轮廓，Chrome 无法嵌入 PDF，
+   导出「可复制 PDF」时会退化成逐个字形描路径，导致体积暴涨、不同阅读器粗细不一。 */
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/noto-sans-sc-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/noto-sans-sc-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/noto-sans-sc-700.woff2') format('woff2');
+}
 
 @config '../../tailwind.config.ts';
 @custom-variant dark (&:is(.dark *));
