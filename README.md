@@ -47,14 +47,9 @@
 | Locust 失败数 / 样本缺失数                        | 0 / 0              | 0 / 0              |
 | 异步队列峰值 `pendingPeak` / `streamLengthPeak` | 不适用（无队列）           | 1 / 1，收尾归零         |
 
-**口径说明（引用前必读）**
+表中 `upload_request_ms` 两版语义不同（同步版含图片处理，异步版只到上传流结束），不可横向比较；正式口径为 `total_to_image_parsed_ms`，P95 在 10 个样本下即该组最大值。本轮为单轮、单机、单语料对照，不构成容量推断。
 
-- 正式对比口径是 `total_to_image_parsed_ms`。异步后「上传接口返回」只等到上传流 `batch-complete`，不再等图片处理完成，因此 `upload_request_ms` 的 34.77 → 0.52 秒**不是链路提速**；把它当降幅会得到「降低 98.5%」的错误结论，故表中标为「不可比」。
-- P95 采用最近秩定义，本轮每组 10 个样本，`ceil(10 × 0.95) = 10`，故上表 P95 **等于该组样本最大值**，不能作为长尾外推依据。
-- 「等价平均单张耗时」由测量时间窗推出（含样本间空档），与「总耗时均值」不是同一指标，两者不可互相换算（34.78 ÷ 5 = 6.96 ≠ 7.45）。吞吐原值为 0.134279 / 0.274556 张/秒。
-- 本轮为**单轮、单机、单语料、10 个正式样本**，只支持「同步串行 vs 异步并发 3」这一个维度的结论，**不构成生产容量推断**。
-
-原始报告、逐样本明细与复现命令：[`formal-ab-20260912a/VERIFICATION.md`](AI-Resume-Builder-QA/reports/performance/image-parser/formal-ab-20260912a/VERIFICATION.md) —— 含 `comparison.csv`、两组 `summary.json`、`samples.jsonl`、Locust 统计与队列采样。该轮是首轮完整通过「Locust 指标 + 数据库逐篇核验 + 清理校验」的正式对比，前三轮编排均失败（其中一轮为 async 组数据库校验口径过严，已按产品契约校正）。
+原始报告与逐样本明细：[`formal-ab-20260912a/VERIFICATION.md`](AI-Resume-Builder-QA/reports/performance/image-parser/formal-ab-20260912a/VERIFICATION.md)（含 `comparison.csv`、两组 `summary.json`、`samples.jsonl`、Locust 统计与队列采样）。
 
 ## 系统结构
 
