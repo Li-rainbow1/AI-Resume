@@ -88,17 +88,6 @@ $env:QA_RUN_UI = '1'
 .\scripts\run_regression.ps1 -Performance image_worker_comparison
 ```
 
-## 报告产物
-
-`reports/` 下**只入库「跑完即固定」的报告成品**；每次运行都会产生的产物一律不入库：`reports/runtime/`、`reports/regression/` 轮次目录、`reports/playwright/`、`reports/junit/`、Allure 原始结果，以及性能编排生成的业务源码快照。
-
-| 路径                                                      | 内容                                               |
-| ------------------------------------------------------- | ------------------------------------------------ |
-| `reports/performance/image-parser/formal-ab-20260912a/` | 图片解析性能正式基线，含 `VERIFICATION.md`、逐组指标与 Locust 原始统计 |
-| `reports/locust/image-worker-comparison/`               | 图片解析对照的 Locust 统计与 HTML 报告                       |
-
-一键回归的每轮产物写入 `reports/regression/<QA_RUN_ID>/`（不入库），以 `allure-report/index.html` 为主要报告入口。
-
 ## 隔离与安全
 
 - QA 栈使用独立容器、网络、端口与数据卷，**不连接业务数据库**；隔离环境内的后端与图片 Worker 统一指向本地 Mock AI。
