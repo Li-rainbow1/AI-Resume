@@ -1,0 +1,41 @@
+[
+  {
+    "variant": "async_c3",
+    "Type": "BUSINESS",
+    "Name": "图片上传请求完成耗时",
+    "Request Count": 10,
+    "Failure Count": 0,
+    "Average Response Time": 516.0553100466728,
+    "Median Response Time": 490,
+    "Min Response Time": 475.22560000419617,
+    "Max Response Time": 560.0546998977661,
+    "95%": 560,
+    "99%": 560
+  },
+  {
+    "variant": "async_c3",
+    "Type": "BUSINESS",
+    "Name": "发起上传至图片解析完成总耗时",
+    "Request Count": 10,
+    "Failure Count": 0,
+    "Average Response Time": 15758.634590089321,
+    "Median Response Time": 14000,
+    "Min Response Time": 11018.007799983025,
+    "Max Response Time": 28654.97149991989,
+    "95%": 29000,
+    "99%": 29000
+  },
+  {
+    "variant": "async_c3",
+    "Type": "BUSINESS",
+    "Name": "图片解析业务校验",
+    "Request Count": 10,
+    "Failure Count": 0,
+    "Average Response Time": 15758.634590089321,
+    "Median Response Time": 14000,
+    "Min Response Time": 11018.007799983025,
+    "Max Response Time": 28654.97149991989,
+    "95%": 29000,
+    "99%": 29000
+  }
+]

@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-resume-builder-qa"
+version = "0.1.0"
+description = "AI Resume Builder 独立接口、UI、性能自动化与 Mock AI 工程"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography>=45.0,<47.0",
+  "fastapi>=0.115,<1.0",
+  "httpx>=0.28,<1.0",
+  "locust>=2.41,<3.0",
+  "pillow>=11.0,<13.0",
+  "pymysql>=1.1,<2.0",
+  "python-docx>=1.1,<2.0",
+  "python-dotenv>=1.1,<2.0",
+  "python-multipart>=0.0.20,<1.0",
+  "redis>=5.0,<7.0",
+  "reportlab>=4.2,<5.0",
+  "uvicorn>=0.34,<1.0",
+]
+
+[project.optional-dependencies]
+eval = [
+  "deepeval==4.1.4",
+]
+test = [
+  "allure-pytest>=2.14,<3.0",
+  "pytest>=8.3,<10.0",
+  "pytest-asyncio>=0.25,<2.0",
+  "pytest-html>=4.1,<5.0",
+  "pytest-playwright>=0.7,<1.0",
+  "pytest-timeout>=2.3,<3.0",
+]
+
+[tool.setuptools]
+# 只登记留在仓库根的技术角色包；按测试类型收敛到 tests/ 下的框架代码通过命名空间包
+# tests.* 解析，由 pytest 的 pythonpath 与脚本内的 sys.path 注入保证仓库根在搜索路径上。
+packages = ["clients", "fixtures", "quality"]
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+addopts = [
+  "-ra",
+  "--strict-config",
+  "--strict-markers",
+  "--basetemp=reports/runtime/pytest-temp",
+  "--junitxml=reports/junit/pytest.xml",
+]
+asyncio_mode = "auto"
+markers = [
+  "integration: 需要运行中的业务服务、管理员凭据和写入授权",
+  "live_contract: 只读访问运行中的业务服务，不创建业务数据",
+  "mock_ai: FastAPI Mock AI 的契约测试",
+  "quality_eval: 需要真实 Chat、Embedding、Vision/OCR 的 RAG 质量评测",
+  "ui: 需要隔离前端与浏览器的 Playwright UI 测试",
+]

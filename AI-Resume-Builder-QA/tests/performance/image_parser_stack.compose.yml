@@ -1,0 +1,269 @@
+# 图片解析性能对比专用隔离栈。由 run_image_worker_comparison.py 传入唯一项目名、端口和数据卷前缀。
+x-backend-environment: &backend-environment
+  SERVER_PORT: "8999"
+  APP_AUTH_TOKEN_SECRET: "${QA_AUTH_TOKEN_SECRET}"
+  APP_AUTH_TOKEN_TTL_SECONDS: "3600"
+  APP_SYSTEM_CONFIG_ENCRYPTION_KEY: "${QA_SYSTEM_CONFIG_ENCRYPTION_KEY}"
+  MYSQL_DATASOURCE_URL: "mysql+pymysql://root:${QA_MYSQL_ROOT_PASSWORD}@mysql:3306/${QA_MYSQL_DATABASE}"
+  MYSQL_DATASOURCE_USERNAME: root
+  MYSQL_DATASOURCE_PASSWORD: "${QA_MYSQL_ROOT_PASSWORD}"
+  PGVECTOR_DATASOURCE_URL: "postgresql+psycopg://${QA_POSTGRES_USER}:${QA_POSTGRES_PASSWORD}@pgvector:5432/${QA_POSTGRES_DB}"
+  PGVECTOR_DATASOURCE_USERNAME: "${QA_POSTGRES_USER}"
+  PGVECTOR_DATASOURCE_PASSWORD: "${QA_POSTGRES_PASSWORD}"
+  OPENAI_BASE_URL: "${PERF_OPENAI_BASE_URL}"
+  OPENAI_API_KEY: "${PERF_OPENAI_API_KEY}"
+  OPENAI_CHAT_BASE_URL: "${PERF_OPENAI_CHAT_BASE_URL}"
+  OPENAI_CHAT_API_KEY: "${PERF_OPENAI_CHAT_API_KEY}"
+  OPENAI_CHAT_COMPLETIONS_PATH: "${PERF_OPENAI_CHAT_COMPLETIONS_PATH}"
+  OPENAI_CHAT_MODEL: "${PERF_OPENAI_CHAT_MODEL}"
+  EMBEDDING_PROVIDER: "${PERF_EMBEDDING_PROVIDER}"
+  OPENAI_EMBEDDING_BASE_URL: "${PERF_OPENAI_EMBEDDING_BASE_URL}"
+  OPENAI_EMBEDDING_API_KEY: "${PERF_OPENAI_EMBEDDING_API_KEY}"
+  OPENAI_EMBEDDING_MODEL: "${PERF_OPENAI_EMBEDDING_MODEL}"
+  OPENAI_EMBEDDING_TIMEOUT_SECONDS: "${PERF_OPENAI_EMBEDDING_TIMEOUT_SECONDS:-20}"
+  VISION_PROVIDER: "${PERF_VISION_PROVIDER}"
+  OPENAI_VISION_BASE_URL: "${PERF_OPENAI_VISION_BASE_URL}"
+  OPENAI_VISION_API_KEY: "${PERF_OPENAI_VISION_API_KEY}"
+  OPENAI_VISION_MODEL: "${PERF_OPENAI_VISION_MODEL}"
+  OPENAI_VISION_TIMEOUT_SECONDS: "${PERF_OPENAI_VISION_TIMEOUT_SECONDS:-20}"
+  RAG_OBJECT_STORAGE_ENDPOINT: http://minio:9000
+  RAG_OBJECT_STORAGE_BUCKET: qa-rag-documents
+  RAG_OBJECT_STORAGE_ACCESS_KEY: "${QA_MINIO_APP_ACCESS_KEY}"
+  RAG_OBJECT_STORAGE_SECRET_KEY: "${QA_MINIO_APP_SECRET_KEY}"
+  RAG_OBJECT_STORAGE_REGION: us-east-1
+  RAG_IMAGE_ENRICHMENT_REDIS_URL: redis://redis:6379/0
+  RAG_IMAGE_ENRICHMENT_CONCURRENCY: "${QA_RAG_IMAGE_ENRICHMENT_CONCURRENCY:-3}"
+  REALTIME_PROXY_TICKET_REDIS_URL: redis://redis:6379/0
+  AUTOGEN_ENABLED: "false"
+
+services:
+  mock-ai:
+    image: "${IMAGE_PARSER_MOCK_IMAGE:-ai-resume-builder-python-ai-backend:latest}"
+    working_dir: /qa
+    command: ["uvicorn", "tests.mock.mock_server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      MOCK_AI_DEFAULT_SCENARIO: normal
+      MOCK_AI_TIMEOUT_DELAY_SECONDS: "${MOCK_AI_TIMEOUT_DELAY_SECONDS:-0.2}"
+      MOCK_EMBEDDING_DIMENSIONS: "${MOCK_EMBEDDING_DIMENSIONS:-1024}"
+      MOCK_VISION_DELAY_SECONDS: "${MOCK_VISION_DELAY_SECONDS:-1}"
+      MOCK_EMBEDDING_DELAY_SECONDS: "${MOCK_EMBEDDING_DELAY_SECONDS:-0.1}"
+    volumes:
+      - "${QA_REPOSITORY_ROOT}:/qa:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: "${QA_MYSQL_DATABASE}"
+      MYSQL_ROOT_PASSWORD: "${QA_MYSQL_ROOT_PASSWORD}"
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${QA_REDIS_PORT}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  pgvector:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: "${QA_POSTGRES_DB}"
+      POSTGRES_USER: "${QA_POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${QA_POSTGRES_PASSWORD}"
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${QA_MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${QA_MINIO_ROOT_PASSWORD}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: "${QA_MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${QA_MINIO_ROOT_PASSWORD}"
+      MINIO_APP_ACCESS_KEY: "${QA_MINIO_APP_ACCESS_KEY}"
+      MINIO_APP_SECRET_KEY: "${QA_MINIO_APP_SECRET_KEY}"
+      MINIO_BUCKET: qa-rag-documents
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set qa http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null
+        mc mb --ignore-existing "qa/$${MINIO_BUCKET}" >/dev/null
+        mc anonymous set none "qa/$${MINIO_BUCKET}" >/dev/null
+        mc admin user add qa "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" >/dev/null 2>&1 || true
+        cat > /tmp/qa-rag-policy.json <<EOF
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::$${MINIO_BUCKET}"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::$${MINIO_BUCKET}/*"]}]}
+        EOF
+        mc admin policy create qa qa-rag-documents /tmp/qa-rag-policy.json >/dev/null 2>&1 || true
+        mc admin policy attach qa qa-rag-documents --user "$${MINIO_APP_ACCESS_KEY}" >/dev/null
+
+  flyway-mysql:
+    image: resume-builder-flyway:13.3.0-mysql-26.7.0
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: "jdbc:mysql://mysql:3306/${QA_MYSQL_DATABASE}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      FLYWAY_USER: root
+      FLYWAY_PASSWORD: "${QA_MYSQL_ROOT_PASSWORD}"
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "0"
+      FLYWAY_CONNECT_RETRIES: "60"
+      FLYWAY_LOCK_RETRY_COUNT: "50"
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+    volumes:
+      - "${IMAGE_PARSER_MIGRATIONS_ROOT}/sql/migrations/mysql:/flyway/sql:ro"
+    command: ["migrate"]
+
+  flyway-pgvector:
+    image: resume-builder-flyway:13.3.0-mysql-26.7.0
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: "jdbc:postgresql://pgvector:5432/${QA_POSTGRES_DB}"
+      FLYWAY_USER: "${QA_POSTGRES_USER}"
+      FLYWAY_PASSWORD: "${QA_POSTGRES_PASSWORD}"
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "0"
+      FLYWAY_CONNECT_RETRIES: "60"
+      FLYWAY_LOCK_RETRY_COUNT: "50"
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+    volumes:
+      - "${IMAGE_PARSER_MIGRATIONS_ROOT}/sql/migrations/postgresql:/flyway/sql:ro"
+    command: ["migrate"]
+
+  qa-user-seed:
+    image: mysql:8.4
+    depends_on:
+      flyway-mysql:
+        condition: service_completed_successfully
+    environment:
+      MYSQL_ROOT_PASSWORD: "${QA_MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: "${QA_MYSQL_DATABASE}"
+      QA_RUN_ID: "${QA_RUN_ID}"
+      QA_ADMIN_USERNAME: "${QA_ADMIN_USERNAME}"
+      QA_ADMIN_PASSWORD: "${QA_ADMIN_PASSWORD}"
+      QA_USER_USERNAME: "${QA_USER_USERNAME}"
+      QA_USER_PASSWORD: "${QA_USER_PASSWORD}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        admin_hash=$$(printf '%s' "$${QA_ADMIN_PASSWORD}" | sha256sum | awk '{print $$1}')
+        user_hash=$$(printf '%s' "$${QA_USER_PASSWORD}" | sha256sum | awk '{print $$1}')
+        MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysql -h mysql -uroot "$${MYSQL_DATABASE}" --execute="
+          INSERT INTO auth_users (user_id, username, password_hash, display_name, role, permissions_json, enabled)
+          VALUES
+            ('qa-admin-$${QA_RUN_ID}', '$${QA_ADMIN_USERNAME}', '$${admin_hash}', 'QA 管理员', 'admin', JSON_ARRAY('resume_optimize','ai_interview','knowledge_admin'), 1),
+            ('qa-user-$${QA_RUN_ID}', '$${QA_USER_USERNAME}', '$${user_hash}', 'QA 普通用户', 'user', JSON_ARRAY('resume_optimize','ai_interview'), 1)
+          ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash), display_name=VALUES(display_name), role=VALUES(role), permissions_json=VALUES(permissions_json), enabled=1;"
+
+  backend-current:
+    profiles: ["current"]
+    image: "${IMAGE_PARSER_CURRENT_IMAGE}"
+    depends_on:
+      mock-ai:
+        condition: service_healthy
+      flyway-mysql:
+        condition: service_completed_successfully
+      flyway-pgvector:
+        condition: service_completed_successfully
+      qa-user-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment: *backend-environment
+    ports:
+      - "127.0.0.1:${QA_BACKEND_PORT}:8999"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8999/health', timeout=3)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+  backend-legacy:
+    profiles: ["legacy"]
+    build:
+      context: "${IMAGE_PARSER_LEGACY_CONTEXT}"
+      dockerfile: Dockerfile
+    image: "${IMAGE_PARSER_LEGACY_IMAGE}"
+    depends_on:
+      mock-ai:
+        condition: service_healthy
+      flyway-mysql:
+        condition: service_completed_successfully
+      flyway-pgvector:
+        condition: service_completed_successfully
+      qa-user-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment: *backend-environment
+    ports:
+      - "127.0.0.1:${QA_BACKEND_PORT}:8999"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8999/health', timeout=3)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+  image-worker:
+    profiles: ["async"]
+    image: "${IMAGE_PARSER_CURRENT_IMAGE}"
+    command: ["python", "-m", "app.worker_main"]
+    depends_on:
+      backend-current:
+        condition: service_healthy
+    environment: *backend-environment
+
+volumes:
+  mysql-data:
+  pgvector-data:
+  minio-data:

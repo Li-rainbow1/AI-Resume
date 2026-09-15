@@ -1,0 +1,9 @@
+services:
+  backend:
+    command: ["uvicorn", "interview_capture:app", "--host", "0.0.0.0", "--port", "8999"]
+    environment:
+      PYTHONPATH: /app:/qa-quality
+      QA_INTERVIEW_CAPTURE_DIR: /qa-interview-captures
+    volumes:
+      - ./quality:/qa-quality:ro
+      - ./reports/interview-captures:/qa-interview-captures

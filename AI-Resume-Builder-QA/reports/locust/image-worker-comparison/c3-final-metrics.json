@@ -1,0 +1,38 @@
+[
+  {
+    "Type": "BUSINESS",
+    "Name": "图片正文入库时间 [c3]",
+    "Request Count": 2,
+    "Failure Count": 0,
+    "Average Response Time": 2044.0425999164581,
+    "Median Response Time": 820,
+    "Min Response Time": 816.8866999149323,
+    "Max Response Time": 3271.198499917984,
+    "95%": 3300,
+    "99%": 3300
+  },
+  {
+    "Type": "BUSINESS",
+    "Name": "图片队列等待时间",
+    "Request Count": 2,
+    "Failure Count": 0,
+    "Average Response Time": 556.2251999378204,
+    "Median Response Time": 31,
+    "Min Response Time": 30.97029995918274,
+    "Max Response Time": 1081.4800999164581,
+    "95%": 1100,
+    "99%": 1100
+  },
+  {
+    "Type": "BUSINESS",
+    "Name": "图片增强完整时间",
+    "Request Count": 2,
+    "Failure Count": 0,
+    "Average Response Time": 1602.3098499178886,
+    "Median Response Time": 31,
+    "Min Response Time": 30.98009991645813,
+    "Max Response Time": 3173.639599919319,
+    "95%": 3200,
+    "99%": 3200
+  }
+]

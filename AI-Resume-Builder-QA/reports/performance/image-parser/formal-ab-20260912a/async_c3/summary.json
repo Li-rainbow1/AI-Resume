@@ -1,0 +1,1623 @@
+{
+  "variant": "async_c3",
+  "composeProject": "arb-perf-image-formal-ab-20260912a-async-c3-c8c3f97c",
+  "backendProfile": "current",
+  "backendPort": 19682,
+  "workerConcurrency": 3,
+  "modelMode": "real",
+  "models": {
+    "mode": "real",
+    "chat": {
+      "model": "deepseek-flash",
+      "baseUrlHost": "api.deepseek.com",
+      "completionsPath": "/chat/completions"
+    },
+    "embedding": {
+      "provider": "openai",
+      "model": "qwen3.7-text-embedding-flash",
+      "baseUrlHost": "dashscope.aliyuncs.com"
+    },
+    "vision": {
+      "provider": "openai",
+      "model": "deepseek-flash",
+      "baseUrlHost": "api.deepseek.com"
+    }
+  },
+  "timing": {
+    "uploadRequest": "从发起上传到上传流 batch-complete 的客户端耗时",
+    "total": "从发起上传到全部图片处理终态的客户端耗时；数据库核验单列",
+    "pollingNote": "异步组的状态轮询用于观察终态，轮询间隔不作为精确队列等待时间。",
+    "pollingIntervalSeconds": 1.0
+  },
+  "cleanupExitCode": 0,
+  "status": "passed",
+  "imageId": "sha256:e420a709dadf5da974f9761b106ae7cd43974529e7cded935d71c04603f6a879",
+  "containers": [
+    {
+      "service": "backend-current",
+      "imageId": "sha256:e420a709dadf5da974f9761b106ae7cd43974529e7cded935d71c04603f6a879",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "flyway-mysql",
+      "imageId": "sha256:e8b8ea2c5255d90794fbae644b30e1fc1cad85afb87c61c79c441894e673108f",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "flyway-pgvector",
+      "imageId": "sha256:e8b8ea2c5255d90794fbae644b30e1fc1cad85afb87c61c79c441894e673108f",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "image-worker",
+      "imageId": "sha256:e420a709dadf5da974f9761b106ae7cd43974529e7cded935d71c04603f6a879",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "minio",
+      "imageId": "sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "minio-init",
+      "imageId": "sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "mock-ai",
+      "imageId": "sha256:e420a709dadf5da974f9761b106ae7cd43974529e7cded935d71c04603f6a879",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "mysql",
+      "imageId": "sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "pgvector",
+      "imageId": "sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "qa-user-seed",
+      "imageId": "sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "redis",
+      "imageId": "sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    }
+  ],
+  "locustExitCode": 0,
+  "samples": {
+    "warmup": 2,
+    "measured": 10,
+    "failed": 0,
+    "failureRate": 0.0,
+    "uploadRequest": {
+      "sampleCount": 10,
+      "valueCount": 10,
+      "missingCount": 0,
+      "meanMs": 516.055,
+      "medianMs": 509.849,
+      "p95Ms": 560.055
+    },
+    "totalToImageParsed": {
+      "sampleCount": 10,
+      "valueCount": 10,
+      "missingCount": 0,
+      "meanMs": 15758.635,
+      "medianMs": 14609.623,
+      "p95Ms": 28654.971
+    }
+  },
+  "databaseValidation": {
+    "documents": {
+      "434a6b6fd3cb44018f131da36ecbad46": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 8,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "4ccaa63769b14abc9ca0820f046ed993": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "541bd07a9fd34b2da36afb5db605484e": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 5,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "7b423bb70dc14dfb931f2f2bc616d9bd": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "911321b4e5b74ac08662af4b28dbf158": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "a160cb0ac889489b9d2ca019cc4c8c26": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "a840b0785c754766878eaf40989ef88c": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "a9eb140795f04926810e31a5f20b9c08": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "b19bde97ef414eafaf9b1e975315830f": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "cd669965f10f4dc4b1bae5907ff7da97": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 8,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "d49db359de304cd788a1d061b464b253": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "e33d2707d2494e01845478df67063e24": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      }
+    },
+    "status": "passed",
+    "durationMs": 410.085,
+    "skippedImages": {
+      "total": 0,
+      "documents": {}
+    }
+  },
+  "imageSha256": [
+    "0106b0e85a61891410600e2f458b71f9fb6ab93e44b08ef065cab17d509ecf46",
+    "0bcc58ec59934aee4af8d23247b4f17e444ea70b18f3c1747d9d8e631df76642",
+    "ae496e566de0237f2e0714b3e490ce401e47519b9ac1252f6e5987c80a324bdd",
+    "900c94f1f17850d9020cad1335efe053f15f3463121bb625f02d985545399e6e",
+    "d48dca9df3caed9b78ae22d9261ccc68fa46ef5dd37be5cb65034a015256425a"
+  ],
+  "queueMetrics": {
+    "applicable": true,
+    "sampleCount": 204,
+    "undeliveredPeak": 0,
+    "pendingPeak": 1,
+    "streamLengthPeak": 1,
+    "endUndelivered": 0,
+    "endPending": 0,
+    "endStreamLength": 0,
+    "samples": [
+      {
+        "timestampEpochMs": 1789144821047.684,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144823948.151,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144824961.142,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144825972.935,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144826986.446,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144828012.445,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144829033.984,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144830061.174,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144831079.23,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144832098.012,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144833120.202,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144834142.06,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144835169.479,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144836182.732,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144837201.13,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144838215.166,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144839243.115,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144840261.844,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144841282.923,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144842294.473,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144843320.84,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144844342.282,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144845355.797,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144846376.853,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144847390.072,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144848401.637,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144849412.052,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144850438.275,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144854156.708,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144855182.094,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144856204.075,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144857229.553,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144858257.575,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144859280.363,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144860303.114,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144861326.067,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144862337.465,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144863354.739,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144864376.169,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144865388.066,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144866403.493,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144867423.83,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144868438.927,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144869452.429,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144870465.254,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144871489.146,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144875022.729,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144876039.709,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144877052.244,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144878076.722,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144879091.731,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144880117.973,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144881145.121,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144882168.519,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144883193.277,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144884204.596,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144885228.08,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144886250.212,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144887263.642,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144890827.268,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144891839.458,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144892851.944,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144893877.665,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144894898.907,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144895925.275,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144896938.948,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144897963.547,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144898974.372,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144899999.308,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144901026.752,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144902050.69,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144903073.141,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144904094.646,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144907764.235,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144908778.041,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144909789.739,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144910812.862,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144911826.622,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144912837.621,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144913858.453,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144914880.751,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144915902.847,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144916926.531,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144917938.037,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144918958.984,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144919969.967,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144920994.393,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144924579.605,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144925605.727,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144926622.254,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144927640.876,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144928663.486,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144929676.248,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144930696.667,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144931710.815,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144932734.95,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144933756.104,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144934782.327,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144938268.719,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144939289.626,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144940315.552,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144941339.259,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144942350.202,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144943376.523,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144944399.876,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144945414.075,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144946437.871,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144947463.414,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144948487.801,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144949501.111,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144950539.05,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144951555.055,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144952581.326,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144953596.321,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144954621.184,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144955633.559,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144956658.06,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144957669.215,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144958692.447,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144959705.335,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144960716.699,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144961744.49,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144962755.791,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144963781.853,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144964808.723,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144965832.06,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144966854.971,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144969662.024,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144970687.754,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144971700.848,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144972725.885,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144973746.583,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144974759.401,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144975781.831,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144976803.246,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144977817.602,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144978840.538,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144979862.751,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144980883.508,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144981894.733,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144982918.481,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144983929.559,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144984943.94,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144985962.377,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144989677.159,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789144990704.486,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144991719.348,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144992742.938,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144993769.769,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144994801.498,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144995814.428,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144996825.517,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144997842.239,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144998864.133,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789144999878.535,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145000903.918,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145001920.302,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145002945.926,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145003966.645,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145007516.778,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789145008530.908,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145009543.171,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145010552.851,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145011567.05,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145012579.64,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145013607.927,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145014628.594,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145015653.815,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145016666.388,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145017678.422,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145018700.538,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145019712.309,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145020736.01,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145021761.403,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145022786.903,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145023813.11,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145027353.998,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789145028378.767,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145029404.595,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145030422.415,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145031433.968,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145032448.189,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145033473.479,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145034497.923,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145035519.15,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145036542.617,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145037565.187,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145038601.784,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789145042016.667,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      },
+      {
+        "timestampEpochMs": 1789145043035.149,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145044055.645,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145045079.183,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145046100.732,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145047112.647,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145048124.101,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145049143.866,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145050168.232,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145051192.079,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145052204.238,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145053218.957,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145054240.338,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145055251.081,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145056275.421,
+        "streamLength": 1,
+        "undeliveredCount": 0,
+        "pendingCount": 1
+      },
+      {
+        "timestampEpochMs": 1789145057678.998,
+        "streamLength": 0,
+        "undeliveredCount": 0,
+        "pendingCount": 0
+      }
+    ]
+  },
+  "throughput": {
+    "successfulImageCount": 50,
+    "measurementDurationMs": 182112.304,
+    "imagesPerSecond": 0.274556,
+    "basis": "正式样本首个开始时间至最后一个结束时间；按成功入库图片数计算"
+  },
+  "locustMetrics": {
+    "图片上传请求完成耗时": {
+      "Type": "BUSINESS",
+      "Name": "图片上传请求完成耗时",
+      "Request Count": "10",
+      "Failure Count": "0",
+      "Median Response Time": "490",
+      "Average Response Time": "516.0553100466728",
+      "Min Response Time": "475.22560000419617",
+      "Max Response Time": "560.0546998977661",
+      "Average Content Size": "0.0",
+      "Requests/s": "0.04232735186852793",
+      "Failures/s": "0.0",
+      "50%": "530",
+      "66%": "540",
+      "75%": "550",
+      "80%": "560",
+      "90%": "560",
+      "95%": "560",
+      "98%": "560",
+      "99%": "560",
+      "99.9%": "560",
+      "99.99%": "560",
+      "100%": "560"
+    },
+    "图片解析业务校验": {
+      "Type": "BUSINESS",
+      "Name": "图片解析业务校验",
+      "Request Count": "10",
+      "Failure Count": "0",
+      "Median Response Time": "14000",
+      "Average Response Time": "15758.634590089321",
+      "Min Response Time": "11018.007799983025",
+      "Max Response Time": "28654.97149991989",
+      "Average Content Size": "0.0",
+      "Requests/s": "0.04232735186852793",
+      "Failures/s": "0.0",
+      "50%": "15000",
+      "66%": "15000",
+      "75%": "17000",
+      "80%": "17000",
+      "90%": "29000",
+      "95%": "29000",
+      "98%": "29000",
+      "99%": "29000",
+      "99.9%": "29000",
+      "99.99%": "29000",
+      "100%": "29000"
+    },
+    "发起上传至图片解析完成总耗时": {
+      "Type": "BUSINESS",
+      "Name": "发起上传至图片解析完成总耗时",
+      "Request Count": "10",
+      "Failure Count": "0",
+      "Median Response Time": "14000",
+      "Average Response Time": "15758.634590089321",
+      "Min Response Time": "11018.007799983025",
+      "Max Response Time": "28654.97149991989",
+      "Average Content Size": "0.0",
+      "Requests/s": "0.04232735186852793",
+      "Failures/s": "0.0",
+      "50%": "15000",
+      "66%": "15000",
+      "75%": "17000",
+      "80%": "17000",
+      "90%": "29000",
+      "95%": "29000",
+      "98%": "29000",
+      "99%": "29000",
+      "99.9%": "29000",
+      "99.99%": "29000",
+      "100%": "29000"
+    }
+  }
+}
