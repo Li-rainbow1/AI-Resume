@@ -1,0 +1,9 @@
+{
+  "legacyToAsyncC3": {
+    "from": "legacy_serial",
+    "to": "async_c3",
+    "meanTotalMsFrom": 34778.395,
+    "meanTotalMsTo": 15758.635,
+    "reductionPercent": 54.688
+  }
+}

@@ -1,0 +1,41 @@
+[
+  {
+    "variant": "legacy_serial",
+    "Type": "BUSINESS",
+    "Name": "图片上传请求完成耗时",
+    "Request Count": 10,
+    "Failure Count": 0,
+    "Average Response Time": 34774.58024996519,
+    "Median Response Time": 32000,
+    "Min Response Time": 18901.22890007496,
+    "Max Response Time": 52250.19339978695,
+    "95%": 52000,
+    "99%": 52000
+  },
+  {
+    "variant": "legacy_serial",
+    "Type": "BUSINESS",
+    "Name": "发起上传至图片解析完成总耗时",
+    "Request Count": 10,
+    "Failure Count": 0,
+    "Average Response Time": 34778.39488002062,
+    "Median Response Time": 32000,
+    "Min Response Time": 18905.206700086594,
+    "Max Response Time": 52253.22909998894,
+    "95%": 52000,
+    "99%": 52000
+  },
+  {
+    "variant": "legacy_serial",
+    "Type": "BUSINESS",
+    "Name": "图片解析业务校验",
+    "Request Count": 10,
+    "Failure Count": 0,
+    "Average Response Time": 34778.39488002062,
+    "Median Response Time": 32000,
+    "Min Response Time": 18905.206700086594,
+    "Max Response Time": 52253.22909998894,
+    "95%": 52000,
+    "99%": 52000
+  }
+]

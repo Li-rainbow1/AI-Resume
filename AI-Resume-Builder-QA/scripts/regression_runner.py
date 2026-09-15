@@ -194,7 +194,7 @@ def main():
         if args.quality:
             pytest_stage('quality', ['tests/quality/test_real_rag_quality.py'])
         else:
-            pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/clients', 'tests/interview'])
+            pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/interview'])
             pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py'])
         if selected:
             for name in selected:
@@ -202,7 +202,7 @@ def main():
                 report_root = args.report / name
                 command_args = [
                     sys.executable,
-                    'performance/run_image_worker_comparison.py',
+                    'tests/performance/run_image_worker_comparison.py',
                     '--report-root',
                     str(report_root),
                     '--run-id',

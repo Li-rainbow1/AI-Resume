@@ -1,3 +1,4 @@
+# Python 虚拟环境与缓存
 .venv/
 __pycache__/
 *.py[cod]
@@ -7,21 +8,39 @@ __pycache__/
 htmlcov/
 .ruff_cache/
 .mypy_cache/
+*.egg-info/
+build/
+dist/
+
 # DeepEval 在本地生成的运行缓存与日志，不含需要入库的产物
 .deepeval/
+
+# 本机密钥与环境文件：仅模板可入库
 .env
 .env.test
 # refresh_real_model_env.py 会为 .env.test 生成含真实密钥的备份，必须一并忽略
 .env.test.bak-*
-*.egg-info/
-build/
-dist/
-reports/*
-!reports/README.md
-allure-results/
+
+# 内部文档与评审记录：只在本地保留，不入公开仓库
+docs/
+code-review/
+
+# reports 只入库「跑完即固定」的报告成品；每次运行都会产生的产物与源码快照一律不入库
+reports/runtime/
+reports/**/runtime/
+reports/regression/
+reports/playwright/
+# 面试逐题捕获已内嵌在 reports/quality/<run_id>/interview/case-results.jsonl 的 capture 字段
+reports/interview-captures/
+reports/junit/
+reports/allure-results*/
+reports/tmp-pdfimages-check/
 allure-report/
+allure-results/
 *.jtl
 *.log
+
+# 其它本机产物
 playwright-report/
 test-results/
 .idea/

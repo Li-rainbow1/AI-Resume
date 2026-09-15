@@ -1,0 +1,5 @@
+﻿meanMs,medianMs,metric,missingCount,p95Ms,sampleCount,status,valueCount,variant
+34774.58,32327.386,upload_request_ms,0,52250.193,10,passed,10,legacy_serial
+34778.395,32331.049,total_to_image_parsed_ms,0,52253.229,10,passed,10,legacy_serial
+516.055,509.849,upload_request_ms,0,560.055,10,passed,10,async_c3
+15758.635,14609.623,total_to_image_parsed_ms,0,28654.971,10,passed,10,async_c3

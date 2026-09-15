@@ -5,7 +5,7 @@ services:
     image: ${QA_MOCK_AI_IMAGE:-ai-resume-builder-python-ai-backend:latest}
     container_name: ${QA_CONTAINER_PREFIX:-arb-qa}-mock-ai
     working_dir: /qa
-    command: ["uvicorn", "mock_server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "tests.mock.mock_server.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       MOCK_AI_DEFAULT_SCENARIO: "${MOCK_AI_DEFAULT_SCENARIO:-normal}"
       MOCK_AI_TIMEOUT_DELAY_SECONDS: "${MOCK_AI_TIMEOUT_DELAY_SECONDS:-0.2}"

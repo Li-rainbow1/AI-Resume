@@ -1,0 +1,381 @@
+{
+  "variant": "legacy_serial",
+  "composeProject": "arb-perf-image-formal-ab-20260912a-legacy-serial-fd27ef80",
+  "backendProfile": "legacy",
+  "backendPort": 19681,
+  "workerConcurrency": null,
+  "modelMode": "real",
+  "models": {
+    "mode": "real",
+    "chat": {
+      "model": "deepseek-flash",
+      "baseUrlHost": "api.deepseek.com",
+      "completionsPath": "/chat/completions"
+    },
+    "embedding": {
+      "provider": "openai",
+      "model": "qwen3.7-text-embedding-flash",
+      "baseUrlHost": "dashscope.aliyuncs.com"
+    },
+    "vision": {
+      "provider": "openai",
+      "model": "deepseek-flash",
+      "baseUrlHost": "api.deepseek.com"
+    }
+  },
+  "timing": {
+    "uploadRequest": "从发起上传到上传流 batch-complete 的客户端耗时",
+    "total": "从发起上传到全部图片处理终态的客户端耗时；数据库核验单列",
+    "pollingNote": "异步组的状态轮询用于观察终态，轮询间隔不作为精确队列等待时间。",
+    "pollingIntervalSeconds": 1.0
+  },
+  "cleanupExitCode": 0,
+  "status": "passed",
+  "imageId": "sha256:be83dc76dc2a99c1d79232a9d5e9a87a5eb70f7a756c0a0432a5618159333f5c",
+  "containers": [
+    {
+      "service": "backend-legacy",
+      "imageId": "sha256:be83dc76dc2a99c1d79232a9d5e9a87a5eb70f7a756c0a0432a5618159333f5c",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "flyway-mysql",
+      "imageId": "sha256:e8b8ea2c5255d90794fbae644b30e1fc1cad85afb87c61c79c441894e673108f",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "flyway-pgvector",
+      "imageId": "sha256:e8b8ea2c5255d90794fbae644b30e1fc1cad85afb87c61c79c441894e673108f",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "minio",
+      "imageId": "sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "minio-init",
+      "imageId": "sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "mock-ai",
+      "imageId": "sha256:e420a709dadf5da974f9761b106ae7cd43974529e7cded935d71c04603f6a879",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "mysql",
+      "imageId": "sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "pgvector",
+      "imageId": "sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "qa-user-seed",
+      "imageId": "sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    },
+    {
+      "service": "redis",
+      "imageId": "sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+      "resources": {
+        "Memory": 0,
+        "NanoCpus": 0,
+        "CpuQuota": 0,
+        "CpuPeriod": 0
+      }
+    }
+  ],
+  "locustExitCode": 0,
+  "samples": {
+    "warmup": 2,
+    "measured": 10,
+    "failed": 0,
+    "failureRate": 0.0,
+    "uploadRequest": {
+      "sampleCount": 10,
+      "valueCount": 10,
+      "missingCount": 0,
+      "meanMs": 34774.58,
+      "medianMs": 32327.386,
+      "p95Ms": 52250.193
+    },
+    "totalToImageParsed": {
+      "sampleCount": 10,
+      "valueCount": 10,
+      "missingCount": 0,
+      "meanMs": 34778.395,
+      "medianMs": 32331.049,
+      "p95Ms": 52253.229
+    }
+  },
+  "databaseValidation": {
+    "documents": {
+      "062978921b1941d0bf7bf5b21edd249c": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 5,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "227a3aff707d427bb54ba3983bb05e0a": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 7,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "244c3b66b349471595adb265df676398": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "2f6dbf9933fa42f49ea076cae1c54d56": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 5,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "59783b7cbcc341e0a895e80ab92fc1ac": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "933c5a1759844c549ad10488996525a6": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 8,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "a49d445d2ad340009b8071435e74393b": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 7,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "cad7578c264b4caaaf872897c4038bb8": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 7,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "cff10dcbf4534534b818d06aa0a7d528": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "d91f26eabcff4102bd7f106e9ed1f752": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 5,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "e5f4c8f2453248d09e792dd5b1e55e17": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 8,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      },
+      "fc7f38f21298426c98cd79a9d9e40411": {
+        "status": "completed",
+        "extractionCount": 5,
+        "indexedCount": 5,
+        "skippedCount": 0,
+        "failedCount": 0,
+        "imageChunkCount": 6,
+        "duplicateChunkCount": 0,
+        "errorMessage": ""
+      }
+    },
+    "status": "passed",
+    "durationMs": 396.931,
+    "skippedImages": {
+      "total": 0,
+      "documents": {}
+    }
+  },
+  "imageSha256": [
+    "0106b0e85a61891410600e2f458b71f9fb6ab93e44b08ef065cab17d509ecf46",
+    "0bcc58ec59934aee4af8d23247b4f17e444ea70b18f3c1747d9d8e631df76642",
+    "ae496e566de0237f2e0714b3e490ce401e47519b9ac1252f6e5987c80a324bdd",
+    "900c94f1f17850d9020cad1335efe053f15f3463121bb625f02d985545399e6e",
+    "d48dca9df3caed9b78ae22d9261ccc68fa46ef5dd37be5cb65034a015256425a"
+  ],
+  "queueMetrics": {
+    "applicable": false,
+    "reason": "旧版同步串行链路没有 Redis 图片队列"
+  },
+  "throughput": {
+    "successfulImageCount": 50,
+    "measurementDurationMs": 372358.296,
+    "imagesPerSecond": 0.134279,
+    "basis": "正式样本首个开始时间至最后一个结束时间；按成功入库图片数计算"
+  },
+  "locustMetrics": {
+    "图片上传请求完成耗时": {
+      "Type": "BUSINESS",
+      "Name": "图片上传请求完成耗时",
+      "Request Count": "9",
+      "Failure Count": "0",
+      "Median Response Time": "32000",
+      "Average Response Time": "34352.31284440888",
+      "Min Response Time": "18901.22890007496",
+      "Max Response Time": "52250.19339978695",
+      "Average Content Size": "0.0",
+      "Requests/s": "0.020847942615598247",
+      "Failures/s": "0.0",
+      "50%": "32000",
+      "66%": "33000",
+      "75%": "40000",
+      "80%": "45000",
+      "90%": "52000",
+      "95%": "52000",
+      "98%": "52000",
+      "99%": "52000",
+      "99.9%": "52000",
+      "99.99%": "52000",
+      "100%": "52000"
+    },
+    "图片解析业务校验": {
+      "Type": "BUSINESS",
+      "Name": "图片解析业务校验",
+      "Request Count": "9",
+      "Failure Count": "0",
+      "Median Response Time": "32000",
+      "Average Response Time": "34355.92284447617",
+      "Min Response Time": "18905.206700086594",
+      "Max Response Time": "52253.22909998894",
+      "Average Content Size": "0.0",
+      "Requests/s": "0.020847942615598247",
+      "Failures/s": "0.0",
+      "50%": "32000",
+      "66%": "33000",
+      "75%": "40000",
+      "80%": "45000",
+      "90%": "52000",
+      "95%": "52000",
+      "98%": "52000",
+      "99%": "52000",
+      "99.9%": "52000",
+      "99.99%": "52000",
+      "100%": "52000"
+    },
+    "发起上传至图片解析完成总耗时": {
+      "Type": "BUSINESS",
+      "Name": "发起上传至图片解析完成总耗时",
+      "Request Count": "9",
+      "Failure Count": "0",
+      "Median Response Time": "32000",
+      "Average Response Time": "34355.92284447617",
+      "Min Response Time": "18905.206700086594",
+      "Max Response Time": "52253.22909998894",
+      "Average Content Size": "0.0",
+      "Requests/s": "0.020847942615598247",
+      "Failures/s": "0.0",
+      "50%": "32000",
+      "66%": "33000",
+      "75%": "40000",
+      "80%": "45000",
+      "90%": "52000",
+      "95%": "52000",
+      "98%": "52000",
+      "99%": "52000",
+      "99.9%": "52000",
+      "99.99%": "52000",
+      "100%": "52000"
+    }
+  }
+}

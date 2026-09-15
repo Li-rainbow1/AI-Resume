@@ -33,6 +33,7 @@ def runtime_judge_config():
     return {**judge_config_summary(), "adapter": "interview-json-schema-v1",
             "enable_thinking": False,
             "request_timeout_seconds": 60, "sdk_max_retries": 0,
+            "faithfulness_penalize_ambiguous_claims": True,
             "adapter_sha256": hashlib.sha256(Path(__file__).with_name("interview_judge.py").read_bytes()).hexdigest()}
 
 
@@ -47,11 +48,16 @@ def evaluate_reply(question, reply, context):
     model = InterviewJudge()
     case = LLMTestCase(input=question, actual_output=reply, retrieval_context=context)
     scores = {}
+    # Faithfulness 默认把「依据不足（idk）」的陈述也计入得分，判分偏松；
+    # 开启 penalize_ambiguous_claims 后无依据的补充会被扣分。
+    # Answer Relevancy 无该参数，故按指标分别传参。
+    metric_options = {"faithfulness": {"penalize_ambiguous_claims": True}}
     for name, factory in (("faithfulness", FaithfulnessMetric), ("answer_relevancy", AnswerRelevancyMetric)):
         values, reasons = [], []
         print("开始评分", name, flush=True)
         for _ in range(config["repeat_count"]):
-            metric = factory(model=model, threshold=config["threshold"], include_reason=True, async_mode=False)
+            metric = factory(model=model, threshold=config["threshold"], include_reason=True, async_mode=False,
+                             **metric_options.get(name, {}))
             metric.measure(case)
             if metric.score is None:
                 raise ValueError("Judge 未返回分数")

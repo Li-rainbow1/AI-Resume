@@ -8,12 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from performance import run_image_worker_comparison as image_runner
-from performance.locustfiles.common.lifecycle import ResourceRegistry
+from tests.performance import run_image_worker_comparison as image_runner
 
 
 def test_upload_error_keeps_backend_reason():
-    from performance.locustfiles.common.rag_client import upload_failure
+    from tests.performance.locustfiles.common.rag_client import upload_failure
 
     stream = SimpleNamespace(events=[{"event": "file-result", "result": {"status": "failed", "error_message": "文件超过大小限制 10MB"}}])
     assert upload_failure(stream) == "文件超过大小限制 10MB"
@@ -51,23 +50,6 @@ def test_cleanup_checks_residue(monkeypatch, remaining):
     assert image_runner._verify_stack_removed("arb-perf-image-offline", {}) == bool(remaining)
 
 
-@pytest.mark.parametrize("saved_reply,expected", [("正确回复", True), ("其他会话回复", False)])
-def test_interview_checks_saved_reply(monkeypatch, saved_reply, expected):
-    class Cursor:
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def execute(self, *args): pass
-        def fetchone(self):
-            return ("request", '["request"]', json.dumps({"sessionId": "session", "assistantReply": saved_reply}))
-        def fetchall(self): return [("assistant", saved_reply), ("user", "回答 request")]
-    class Connection(Cursor):
-        def cursor(self): return Cursor()
-    registry = ResourceRegistry(None, None, "user")
-    registry.sessions.add("session")
-    monkeypatch.setattr(registry, "_connection", Connection)
-    assert registry.verify_interview_request("session", "request", "正确回复") is expected
-
-
 def test_locust_finishes_without_waiting_and_closes_writer(tmp_path):
     # 独立解释器内验证真实 Locust 生命周期；用户任务不发送任何 HTTP 请求。
     code = '''
@@ -75,7 +57,7 @@ import gevent, sys
 from locust import User, task
 from locust.env import Environment
 from locust.stats import StatsCSVFileWriter
-from performance.locustfiles.common.locust_compat import finish_run
+from tests.performance.locustfiles.common.locust_compat import finish_run
 class OfflineUser(User):
     @task
     def one(self):

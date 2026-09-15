@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from mock_server.app import app
+from tests.mock.mock_server.app import app
 
 
 @pytest.fixture

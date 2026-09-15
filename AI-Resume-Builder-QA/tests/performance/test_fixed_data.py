@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from performance.locustfiles.common import data_factory
-from performance.locustfiles.common.data_factory import PERFORMANCE_DATA, PerformanceDataFactory
+from tests.performance.locustfiles.common import data_factory
+from tests.performance.locustfiles.common.data_factory import PERFORMANCE_DATA, PerformanceDataFactory
 
 
 def _factory(root: Path, run_id: str) -> PerformanceDataFactory:

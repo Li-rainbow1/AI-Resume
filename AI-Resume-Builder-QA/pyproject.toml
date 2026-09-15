@@ -36,11 +36,14 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["clients", "fixtures", "mock_server", "pages", "performance", "performance.locustfiles", "performance.locustfiles.common", "quality"]
+# 只登记留在仓库根的技术角色包；按测试类型收敛到 tests/ 下的框架代码通过命名空间包
+# tests.* 解析，由 pytest 的 pythonpath 与脚本内的 sys.path 注入保证仓库根在搜索路径上。
+packages = ["clients", "fixtures", "quality"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"
 testpaths = ["tests"]
+pythonpath = ["."]
 python_files = ["test_*.py"]
 addopts = [
   "-ra",

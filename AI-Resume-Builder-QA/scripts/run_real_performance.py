@@ -18,6 +18,9 @@ import pymysql
 
 ROOT = Path(__file__).resolve().parents[1]
 BUSINESS_ROOT = ROOT.parent / "AI-Resume-Builder"
+# runpy 在同一进程内拉起 tests/performance 下的编排器，需要仓库根已在搜索路径上。
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def _decode_root_key(value: str) -> bytes:
@@ -124,7 +127,7 @@ def _run(script: str, script_args: list[str]) -> int:
     sys.argv = [script, *script_args]
     try:
         try:
-            runpy.run_path(str(ROOT / "performance" / script), run_name="__main__")
+            runpy.run_path(str(ROOT / "tests" / "performance" / script), run_name="__main__")
         except SystemExit as exc:
             return int(exc.code or 0)
     finally:

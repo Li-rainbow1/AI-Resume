@@ -5,15 +5,21 @@ import json
 import shutil
 import argparse
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 from PIL import Image
 
-from performance.locustfiles.common.data_factory import IMAGE_COUNT, write_image_pdf
-
-
 QA_ROOT = Path(__file__).resolve().parents[1]
+# 性能素材工厂已收敛到 tests/performance 下：以脚本路径直接执行时先补仓库根，
+# 才能以命名空间包 tests.* 导入。
+if str(QA_ROOT) not in sys.path:
+    sys.path.insert(0, str(QA_ROOT))
+
+from tests.performance.locustfiles.common.data_factory import IMAGE_COUNT, write_image_pdf  # noqa: E402
+
+
 DATA_ROOT = QA_ROOT / "testdata" / "performance"
 
 

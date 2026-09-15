@@ -5,8 +5,8 @@ from playwright.sync_api import Page
 from fixtures.config import QaSettings
 from fixtures.data_factory import RagDataFactory
 from fixtures.lifecycle import CreatedDocumentRegistry
-from pages.knowledge_base_page import KnowledgeBasePage
-from pages.login_page import LoginPage
+from tests.ui.pages.knowledge_base_page import KnowledgeBasePage
+from tests.ui.pages.login_page import LoginPage
 
 
 @pytest.mark.ui
