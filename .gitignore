@@ -17,3 +17,6 @@ __pycache__/
 *.log
 *.tsbuildinfo
 .eslintcache
+
+# AI 助手的工作区数据，含项目长期记忆与临时脚本，不入库
+.workbuddy/
