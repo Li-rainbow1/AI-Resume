@@ -1,6 +1,6 @@
 # AI Resume Builder QA
 
-AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock AI 契约、AI 面试流式边界、Playwright UI 场景、图片解析性能对比与 RAG 质量评测**，并保留可复现的报告产物。
+AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock AI 契约、AI 面试流式边界、Playwright UI 场景与图片解析性能对比**，并保留可复现的报告产物。
 
 被测源码为同项目的业务仓库（Vue 3 前端 + Python AI Backend）。本仓库只承载测试代码、测试数据、测试报告与 Mock AI 服务，不含业务实现。
 
@@ -13,9 +13,11 @@ AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock A
 | AI 面试边界    | `tests/interview/`   | pytest            | —              | 上下文完整性、超阈值摘要、严格流式结束与请求幂等            |
 | UI 自动化     | `tests/ui/`          | pytest-playwright | `ui`           | Markdown 图片附件上传、解析、预览、刷新回显与删除主链     |
 | 性能对比       | `tests/performance/` | Locust            | —              | 图片解析同步串行与异步并发 3 的对照基线               |
-| 质量评测       | `tests/quality/`     | pytest + DeepEval | `quality_eval` | Golden Dataset 上的检索指标、生成指标与报告       |
+| 质量评测       | `tests/quality/`     | pytest + DeepEval | `quality_eval` | 检索与生成指标的评测框架与用例                     |
 
 各类型的入口、前置条件与运行命令见 [`tests/README.md`](tests/README.md)。
+
+`tests/quality/` 与 `quality/` 作为历史评测框架保留，便于追溯既有实现；其配套语料与 Golden Dataset 已移除，该链路停止投入，当前不具备运行条件。
 
 ## 目录结构
 
@@ -23,14 +25,14 @@ AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock A
 tests/          按测试类型收敛的用例与框架代码，六类见上表
 clients/        鉴权、SSE 与 RAG 接口客户端
 fixtures/       配置、管理员 Token、数据工厂与运行清理
-quality/        Golden Dataset 加载、确定性指标、DeepEval 适配与报告
-testdata/       测试数据与 Golden Dataset 素材
-scripts/        环境生成、回归编排、清理校验与质量语料检查
+quality/        质量评测框架：数据集加载、确定性指标、DeepEval 适配与报告
+testdata/       性能场景的测试数据
+scripts/        环境生成、回归编排与清理校验
 reports/        测试报告与运行产物
 compose.qa.yml  隔离 QA 全栈编排
 ```
 
-`clients/`、`fixtures/`、`quality/` 保留在仓库根：它们被 `testdata/quality/**/freeze-manifest.json` 按仓库根相对路径逐字节锚定，移动或改名会使已冻结清单全部失效。收敛进 `tests/` 的框架代码统一以命名空间包 `tests.*` 引用，仓库根由 pytest 的 `pythonpath` 与脚本内的 `sys.path` 注入保证在搜索路径上。
+`clients/`、`fixtures/`、`quality/` 保留在仓库根，按顶层包名导入；收敛进 `tests/` 的框架代码统一以命名空间包 `tests.*` 引用，仓库根由 pytest 的 `pythonpath` 与脚本内的 `sys.path` 注入保证在搜索路径上。
 
 内部文档与过程记录（`docs/`、`code-review/`）只在本地保留，不入本仓库。
 
@@ -72,38 +74,27 @@ docker compose --env-file .env.test -f compose.qa.yml up -d --build
 .\.venv\Scripts\python.exe -m pytest tests\interview # AI 面试上下文与流式边界
 ```
 
-UI 与质量评测默认不执行，需显式开启：
+UI 场景默认不执行，需显式开启：
 
 ```powershell
 $env:QA_RUN_UI = '1'
 .\.venv\Scripts\python.exe -m pytest tests\ui -m ui --browser chromium
-
-$env:QA_RUN_RAG_QUALITY = '1'
-$env:QA_ALLOW_QUALITY_WRITES = '1'
-.\.venv\Scripts\python.exe -m pytest tests\quality\test_real_rag_quality.py -m quality_eval
 ```
-
-真实模型评测还需提供 `QA_QUALITY_REAL_MODELS_CONFIRMED`、RAG 集成写入门禁、`QA_RUN_DEEPEVAL` 与三个 `DEEPEVAL_JUDGE_*` 变量，并安装 `.[test,eval]`。
 
 一键回归按「健康检查、接口、Mock、面试、UI、清理校验」顺序执行，失败即中止且始终执行清理校验：
 
 ```powershell
 .\scripts\run_regression.ps1
 .\scripts\run_regression.ps1 -Performance image_worker_comparison
-.\scripts\run_regression.ps1 -Quality
 ```
 
 ## 报告产物
 
-`reports/` 下**只入库「跑完即固定」的报告成品**；每次运行都会产生的产物一律不入库：`reports/runtime/`、`reports/regression/` 轮次目录、`reports/playwright/`、`reports/junit/`、Allure 原始结果，以及性能编排生成的业务源码快照。面试逐题捕获同样不入库，其内容已内嵌在 `reports/quality/<run_id>/interview/case-results.jsonl` 的 `capture` 字段。
+`reports/` 下**只入库「跑完即固定」的报告成品**；每次运行都会产生的产物一律不入库：`reports/runtime/`、`reports/regression/` 轮次目录、`reports/playwright/`、`reports/junit/`、Allure 原始结果，以及性能编排生成的业务源码快照。
 
 | 路径                                                      | 内容                                               |
 | ------------------------------------------------------- | ------------------------------------------------ |
 | `reports/performance/image-parser/formal-ab-20260912a/` | 图片解析性能正式基线，含 `VERIFICATION.md`、逐组指标与 Locust 原始统计 |
-| `reports/quality/formal-v2-project-scope-20260914/`     | RAG 检索质量正式集报告，含评分修正后的离线重算结果                      |
-| `reports/quality/formal-v2-20260913094309/`             | RAG 检索质量首轮正式集报告                                  |
-| `reports/quality/int-76e348f67fae/`                     | 面试链路生成侧评测，逐题记录真实面试回复与每轮实际收到的依据                   |
-| `reports/quality/api-title-comparison-20260912/`        | 为文档分片补充标题归属信息前后的检索 A/B 对照，含评分修正重算与混例证据定位         |
 | `reports/locust/image-worker-comparison/`               | 图片解析对照的 Locust 统计与 HTML 报告                       |
 
 一键回归的每轮产物写入 `reports/regression/<QA_RUN_ID>/`（不入库），以 `allure-report/index.html` 为主要报告入口。

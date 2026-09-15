@@ -12,6 +12,8 @@
 | `tests/performance/` | 图片解析同步串行 vs 异步并发 3 的隔离对比编排，及其离线编排校验 | 无 | 离线部分无依赖；正式基线需 Docker 与真实业务栈 | `tests/performance/locustfiles/` | 见 [`tests/performance/README.md`](performance/README.md) |
 | `tests/quality/` | 确定性检索指标单元验证、真实模型 RAG 质量基线入口 | `quality_eval`、`integration` | 真实 Chat/Embedding/Vision 与 Judge 门禁 | `quality/`、`clients/`、`fixtures/` | 见 [`quality/README.md`](../quality/README.md) |
 
+> `tests/quality/` 与 `quality/` 为历史评测框架，配套语料与 Golden Dataset 已移除，该链路停止投入、当前不可运行。
+
 零依赖（不需要服务、Docker 或模型）可离线全量执行的三类：
 
 ```powershell
