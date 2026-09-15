@@ -1,0 +1,53 @@
+.resume-print-host {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body.resume-printing {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  body.resume-printing > :not(.resume-print-host) {
+    display: none !important;
+  }
+
+  body.resume-printing .resume-print-host {
+    display: block !important;
+    width: 210mm !important;
+    min-width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body.resume-printing .resume-print-paper {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    min-height: 297mm !important;
+    height: auto !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.resume-printing .resume-print-paper :is(.resume-section, .side-block, .section-card, .entry) {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+}

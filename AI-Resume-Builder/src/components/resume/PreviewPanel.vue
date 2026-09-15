@@ -9,6 +9,7 @@ import {
   type ResumeTemplateKey,
 } from '@/templates/resume'
 import { generateResumeMarkdown, downloadMarkdown } from '@/services/exportMarkdown'
+import { buildResumeFileName } from '@/services/exportFileName'
 
 const store = useResumeStore()
 const resumeRef = ref<HTMLElement | null>(null)
@@ -28,6 +29,10 @@ interface ResumeExportClone {
   exportHost: HTMLElement
   exportNode: HTMLElement
   elementPairs: ExportElementPair[]
+}
+
+interface ResumePrintClone {
+  printHost: HTMLElement
 }
 
 interface PageBreakElementMapping {
@@ -203,6 +208,18 @@ function createResumeExportClone(sourceNode: HTMLElement, renderMode: PdfRenderM
   }
 
   return { exportHost, exportNode, elementPairs }
+}
+
+function createResumePrintClone(sourceNode: HTMLElement): ResumePrintClone {
+  const printHost = document.createElement('div')
+  printHost.className = 'resume-print-host'
+
+  const printNode = sourceNode.cloneNode(true) as HTMLElement
+  printNode.classList.add('resume-print-paper')
+  printHost.appendChild(printNode)
+  document.body.appendChild(printHost)
+
+  return { printHost }
 }
 
 function collectPageBreakElementMappings(
@@ -466,24 +483,55 @@ function handleDocumentPointerDown(event: MouseEvent) {
 function handleExportMarkdown() {
   exportMenuOpen.value = false
   const md = generateResumeMarkdown(store)
-  const name = store.basicInfo.name?.trim() || '简历'
-  downloadMarkdown(`${name}_简历.md`, md)
+  downloadMarkdown(`${buildResumeFileName(store.basicInfo, store.educationList)}.md`, md)
 }
 
 function handleExportJson() {
   exportMenuOpen.value = false
-  const name = store.basicInfo.name?.trim() || '简历'
   const blob = new Blob([store.exportResumeData()], {
     type: 'application/json;charset=utf-8',
   })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${name}_简历.json`
+  a.download = `${buildResumeFileName(store.basicInfo, store.educationList)}.json`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+function exportPrintablePdf() {
+  const sourceNode = resumeRef.value
+  if (!sourceNode || exporting.value) return
+
+  exporting.value = true
+  exportMenuOpen.value = false
+  let printClone: ResumePrintClone | null = null
+  const previousTitle = document.title
+  const cleanUpPrint = () => {
+    printClone?.printHost.remove()
+    document.body.classList.remove('resume-printing')
+    document.title = previousTitle
+    exportProgress.value = 0
+    exportProgressText.value = ''
+    exporting.value = false
+  }
+
+  try {
+    printClone = createResumePrintClone(sourceNode)
+    document.body.classList.add('resume-printing')
+    // 打印对话框的默认文件名取自页面标题，这里临时替换，退出打印后还原。
+    document.title = buildResumeFileName(store.basicInfo, store.educationList)
+    exportProgress.value = 30
+    exportProgressText.value = '请在打印窗口中选择“另存为 PDF”'
+    window.addEventListener('afterprint', cleanUpPrint, { once: true })
+    window.print()
+  } catch (error) {
+    window.removeEventListener('afterprint', cleanUpPrint)
+    console.error('可复制 PDF 导出失败:', error)
+    cleanUpPrint()
+  }
 }
 
 function normalizeForeignObjectCanvasOrigin(
@@ -656,7 +704,7 @@ async function exportPDF(mode: ExportQualityMode) {
     }
 
     await setExportProgress(98, '正在保存文件...')
-    pdf.save(`${store.basicInfo.name || '简历'}_resume.pdf`)
+    pdf.save(`${buildResumeFileName(store.basicInfo, store.educationList)}.pdf`)
     await setExportProgress(100, '导出完成')
   } catch (err) {
     console.error('PDF 导出失败:', err)
@@ -694,6 +742,7 @@ async function exportPDF(mode: ExportQualityMode) {
           {{ exporting ? '导出中...' : '导出' }}
         </button>
         <div v-if="exportMenuOpen && !exporting" class="export-menu">
+          <button class="export-menu-item" @click="exportPrintablePdf">导出可复制 PDF</button>
           <button class="export-menu-item" @click="exportPDF('hd')">导出高清 PDF</button>
           <button class="export-menu-item" @click="exportPDF('compressed')">导出压缩 PDF</button>
           <button class="export-menu-item" @click="handleExportMarkdown">导出 Markdown</button>
