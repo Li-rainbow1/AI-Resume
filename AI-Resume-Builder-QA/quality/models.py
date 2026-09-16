@@ -1,19 +1,172 @@
+"""评测数据的统一结构。
+
+评分只依赖两件事：题目声明的「答案单元」和运行期实际返回的来源。数据集之间
+的差别只有一处——答案单元怎么落到来源上（单文档还是多文档、正则还是语义）。
+所以本模块只描述结构与不变量，不出现任何具体数据集的文件名或字段名；schema
+差异全部下沉到 `quality/loaders.py`。
+
+历史背景：`evidence-v3` 那一代数据集把 `expected_document` 放在题上、把
+`match_patterns` 放在证据上，并且只允许一篇预期文档。跨文档题与语义判分在
+那个形状里表达不出来，所以这里把两代收敛成同一组模型：
+`EvalCase.units[*].selectors` 描述「这条事实可以从哪些来源得到」，
+`AnswerUnit.patterns` 为空表示交给语义判分器。
+"""
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # 只在类型检查期引入：`clients.rag` 依赖 httpx，而本模块要保持「纯结构、
+    # 可被离线判分链路导入」。
+    from clients.rag import UploadAsset
+
+# 旧集没有 schema_version 字段，用这个值代表「单文档 + 正则判分」的那一代。
+LEGACY_SCHEMA_VERSION = "evidence-v3"
+
+ANY_KIND = "any"
+TEXT_KIND = "text"
+IMAGE_KIND = "image"
 
 
 @dataclass(frozen=True)
-class GoldenCase:
+class SourceSelector:
+    """一个答案单元可接受的来源范围。
+
+    单元内多个选择器是或关系（数据集里的 `acceptable_evidence_ids` 就是这种
+    含义）；`document` 用后缀匹配逻辑文档名，因此上传时加不加 run 前缀都能命中。
+    """
+
+    document: str | None = None
+    kind: str = ANY_KIND
+    locator: str | None = None
+
+
+@dataclass(frozen=True)
+class AnswerUnit:
+    """必须被覆盖的一个答案事实。
+
+    `required_parts` 是「同时要命中的子项数」：语义判分只有一项，旧正则集等于
+    正则组数。子项允许由不同片段分摊，因此覆盖判定要在片段之间累加，单条片段
+    命中一半不能算覆盖。
+    """
+
+    unit_id: str
+    claim: str
+    selectors: tuple[SourceSelector, ...] = ()
+    required_parts: int = 1
+    patterns: tuple[tuple[str, ...], ...] = ()
+    acceptance: str = ""
+
+    @property
+    def uses_semantics(self) -> bool:
+        """没有正则规则时只能语义判分；不允许退回关键词匹配。"""
+        return not self.patterns
+
+    def __post_init__(self) -> None:
+        if self.required_parts < 1:
+            raise ValueError(f"答案单元至少要有一个子项：{self.unit_id}")
+        if self.patterns and len(self.patterns) != self.required_parts:
+            raise ValueError(f"正则组数与子项数不一致：{self.unit_id}")
+
+
+@dataclass(frozen=True)
+class EvalCase:
+    """一道评测题；两个 schema 加载后都是这个形状。"""
+
+    schema_version: str
     case_id: str
     question: str
     reference_answer: str
-    expected_document: str
-    expected_source_location: list[dict[str, Any]]
-    expected_facts: list[str]
-    forbidden_facts: list[str]
-    question_type: str
     top_k: int
-    evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
+    answerable: bool
+    units: tuple[AnswerUnit, ...] = ()
+    expected_documents: tuple[str, ...] = ()
+    forbidden_claims: tuple[str, ...] = ()
+    question_type: str = "text"
+    topic: str = ""
+    category: str = ""
+    image_requirement: str = "none"
+    include_in_retrieval_aggregate: bool = True
+    include_in_answer_aggregate: bool = True
+    expected_facts: tuple[str, ...] = ()
+    refusal_rubric: dict[str, Any] = field(default_factory=dict)
+    notes: str = ""
+    # 本题适用哪些 DeepEval 指标；空表示用适配层默认集。旧集只用检索侧两项，
+    # 面试八股集要求四项齐全，因此这件事必须由题目声明而不是写死在适配层。
+    judge_metrics: tuple[str, ...] = ()
+
+    @property
+    def unit_ids(self) -> tuple[str, ...]:
+        return tuple(unit.unit_id for unit in self.units)
+
+    @property
+    def covers_every_document(self) -> bool:
+        """跨文档题：答案单元落在两篇及以上预期文档上。"""
+        documents = {
+            selector.document
+            for unit in self.units
+            for selector in unit.selectors
+            if selector.document
+        }
+        return len(documents) > 1
+
+
+@dataclass(frozen=True)
+class CorpusAsset:
+    """数据集声明的入库素材；`relative_path` 相对数据集目录。"""
+
+    relative_path: str
+    sha256: str
+    kind: str = "document"
+
+
+@dataclass(frozen=True)
+class QualityCorpus:
+    """一轮评测要入库的语料。
+
+    `primary_assets` 是**一次**上传的正文与附件：后端按上传 manifest 里的
+    `relativePath` 把附件关联到正文，所以附件必须与正文同批、且相对路径要和正文中的
+    Markdown 图片引用一致，分两批上传会让图片永远挂不上。
+
+    `noise_assets` 是额外的干扰文档，单独上传是为了便于分别登记与核对数量；旧集需要它
+    来给 Precision@K / MRR 制造区分度，新集的 5 篇正文彼此就是干扰。
+
+    `document_file_names` 是本批次全部正文文件（不含干扰文档），`noise_file_names`
+    是干扰文档；两者都要进清理注册表。
+
+    `expected_unreferenced_attachments` 是「已上传但正文没有引用」的附件相对路径。
+    这类附件不会被关联、也不会进入检索，属于**已知例外**，必须在数据集里点名而不是
+    静默容忍——数量对不上就说明语料与正文已经漂移。
+    """
+
+    primary_assets: list[UploadAsset]
+    noise_assets: list[UploadAsset]
+    document_file_names: list[str]
+    noise_file_names: list[str] = field(default_factory=list)
+    expected_unreferenced_attachments: tuple[str, ...] = ()
+
+    @property
+    def attachment_assets(self) -> list[UploadAsset]:
+        return [asset for asset in self.primary_assets if asset.role == "attachment"]
+
+
+
+@dataclass(frozen=True)
+class CaseSet:
+    """一个数据集加载后的全部内容。
+
+    `cases_path` 是拆分文件（如 `formal.jsonl`），`dataset_dir` 是同目录下的
+    标注与语料根；两者分开是为了让 `formal` / `dev` 共用同一套标注。
+    """
+
+    schema_version: str
+    dataset_dir: Path
+    cases_path: Path
+    cases: tuple[EvalCase, ...]
+    assets: tuple[CorpusAsset, ...] = ()
 
 
 @dataclass
@@ -30,3 +183,8 @@ class CaseResult:
     evidence_matches: dict[str, Any] = field(default_factory=dict)
     failure_reasons: list[str] = field(default_factory=list)
     bad_case_categories: list[str] = field(default_factory=list)
+    # 分组维度：报告按题型与主题分别聚合，避免用总均值掩盖某一类全灭。
+    question_type: str = ""
+    topic: str = ""
+    category: str = ""
+    image_requirement: str = "none"

@@ -1,185 +1,189 @@
+"""确定性检索指标与报告的契约测试。
+
+这些用例不再依赖任何具体数据集文件——旧的 `golden_dataset.jsonl` 已不在本机，
+所以题目全部在内存里构造。数据集加载与 schema 分发的契约在
+`test_dataset_loaders.py`，判分器契约在 `test_semantic_matchers.py`。
+
+题目用正则单元构造，因此整份文件完全离线、不调用任何模型。
+"""
+
 import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
-from quality.dataset import load_golden_dataset
-from quality.assets import QualityAssetFactory
-from quality.metrics import evaluate_case, normalize_text
-from quality.models import CaseResult
+from quality.loaders import CaseSet
+from quality.metrics import SCORING_VERSION, evaluate_case, source_matches
+from quality.models import (
+    IMAGE_KIND,
+    LEGACY_SCHEMA_VERSION,
+    TEXT_KIND,
+    AnswerUnit,
+    CaseResult,
+    EvalCase,
+    SourceSelector,
+)
 from quality.reporting import write_reports
 from quality.runner import run_quality_evaluation
 from quality.runtime_guard import real_model_guard_reason
 
+DOCUMENT = "1-测试.md"
+BADGE = "附件/badge.png"
 
-def _fact_in_answer(fact: str, answer: str) -> bool:
-    """数据集标注自洽检查用的本地判据，不再是生产指标。
 
-    `expected_facts` 已不参与任何指标计算（关键事实覆盖率已删除），只作人工复核标注；
-    这条判据仅用于断言「参考答案确实包含自己声明的预期事实」，防止标注与答案脱节。
-    """
-    normalized = normalize_text(answer)
-    return any(
-        candidate and normalize_text(candidate) in normalized
-        for candidate in str(fact or "").split("|")
+def _text_source(content: str, document: str = DOCUMENT) -> dict:
+    return {"content": content, "metadata": {"documentId": "doc-1", "originalFilename": document,
+                                             "ingestSource": "text_document"}}
+
+
+def _image_source(content: str, locator: str = BADGE, document: str = DOCUMENT) -> dict:
+    return {"content": content, "metadata": {"documentId": "doc-1", "originalFilename": document,
+                                             "ingestSource": "image_vision",
+                                             "imageSourceLocator": locator}}
+
+
+def _unit(unit_id: str, claim: str, *patterns: str, kind: str = TEXT_KIND, locator: str | None = None) -> AnswerUnit:
+    """正则单元：每个正则是一个必须命中的子项，全部命中才算覆盖。"""
+    return AnswerUnit(
+        unit_id=unit_id,
+        claim=claim,
+        selectors=(SourceSelector(document=DOCUMENT, kind=kind, locator=locator),),
+        required_parts=len(patterns),
+        patterns=tuple((pattern,) for pattern in patterns),
     )
 
 
-def test_golden_dataset_has_required_coverage() -> None:
-    path = Path(__file__).resolve().parents[2] / "testdata" / "quality" / "golden_dataset.jsonl"
-    cases = load_golden_dataset(path)
-    counts = {question_type: sum(case.question_type == question_type for case in cases) for question_type in {
-        "text", "image_ocr", "table_or_flow", "mixed", "no_answer"
-    }}
-    assert len(cases) == 20
-    assert counts == {"text": 6, "image_ocr": 4, "table_or_flow": 4, "mixed": 3, "no_answer": 3}
-    # 旧版本的正确数值允许出现在对比解释中，不强制为每题指定禁词。
-    assert next(case for case in cases if case.case_id == "TXT-005").forbidden_facts == []
-    # 无答案题的 expected_facts 已还原为单一「未提供」：那份 27 项同义候选曾专门服务于
-    # 已删除的关键事实覆盖率，现在没有任何消费者。
-    assert [case.expected_facts for case in cases if case.question_type == "no_answer"] == [["未提供"]] * 3
+def _image_case(top_k: int = 4) -> EvalCase:
+    """单元落在图片上：既要文档归属正确，也要图片定位正确。"""
+    return EvalCase(
+        schema_version=LEGACY_SCHEMA_VERSION,
+        case_id="IMG-001",
+        question="徽章上的访问码是多少？",
+        reference_answer="访问码是 LIME-482。",
+        top_k=top_k,
+        answerable=True,
+        units=(_unit("fact-1", "访问码是 LIME-482", "lime-482", kind=IMAGE_KIND, locator=BADGE),),
+        expected_documents=(DOCUMENT,),
+        question_type="image_ocr",
+    )
 
 
-def test_quality_materials_and_reference_answers_are_consistent(tmp_path: Path) -> None:
-    from PIL import Image
-
-    data_root = Path(__file__).resolve().parents[2] / "testdata" / "quality"
-    cases = load_golden_dataset(data_root / "golden_dataset.jsonl")
-    corpus = QualityAssetFactory(tmp_path, "dataset-offline").create()
-    generated = tmp_path / corpus.expected_file_name
-    text = generated.read_text(encoding="utf-8")
-    assert text == (data_root / "corpus" / "quality-corpus.md").read_text(encoding="utf-8")
-    assert len(corpus.primary_assets) == 4
-    # 干扰文档决定 Precision@K 与 MRR 是否有区分度，数量和命名都必须钉住。
-    assert len(corpus.noise_assets) == 3
-    assert corpus.noise_file_names == [asset.relative_path for asset in corpus.noise_assets]
-    assert all((tmp_path / name).exists() for name in corpus.noise_file_names)
-    # 主文档靠 quality-corpus.md 后缀匹配，干扰文档一旦带上该后缀就会被误判成预期文档。
-    assert all("quality-corpus.md" not in name for name in corpus.noise_file_names)
-    assert all((tmp_path / name).read_text(encoding="utf-8") for name in corpus.noise_file_names)
-    # 图片事实不能泄漏到正文中，否则无法检验图片解析与检索能力。
-    image_only_facts = ("LIME-482", "EAST-7", "BETA", "ARCHIVE")
-    assert all(fact not in text for fact in image_only_facts)
-    # 干扰文档同样不得携带图片事实：否则图片题可以只靠纯文本召回「答对」，
-    # 图片解析链路的失败会被干扰文档掩盖。这里只查正文内容，不查文件名。
-    noise_text = "\n".join((tmp_path / name).read_text(encoding="utf-8") for name in corpus.noise_file_names)
-    assert all(fact not in noise_text for fact in image_only_facts)
-    for case in cases:
-        for location in case.expected_source_location:
-            if "imageLocator" in location:
-                image_name = location["imageLocator"]
-                assert f"assets/{image_name}" in text
-                with Image.open(tmp_path / "assets" / image_name) as actual:
-                    assert actual.info["QA-Run-ID"] == "dataset-offline"
-                    with Image.open(data_root / "corpus" / "assets" / image_name) as expected:
-                        assert actual.size == expected.size
-                        assert actual.tobytes() == expected.tobytes()
-        # 这里验证标注自身一致性，不调用模型，也不代表模型回答正确。
-        sources = []
-        for location in case.expected_source_location:
-            metadata = {"originalFilename": corpus.expected_file_name, **location}
-            if "imageLocator" in metadata:
-                metadata["imageSourceLocator"] = metadata.pop("imageLocator")
-                metadata["ingestSource"] = "image_vision"
-            sources.append({"metadata": metadata})
-        metrics = evaluate_case(case, case.reference_answer, sources)
-        if metrics["recall_at_k"] is not None:
-            assert metrics["recall_at_k"] == 1.0, case.case_id
-            # 标注顺序即正确顺序，故首个来源必然相关，MRR 单条得分必须是 1.0。
-            assert metrics["mrr"] == 1.0, case.case_id
-        # 标注自洽：允许用 `|` 写同义候选，任一命中即算覆盖。
-        if case.expected_facts:
-            assert all(_fact_in_answer(fact, case.reference_answer) for fact in case.expected_facts), case.case_id
+def _text_case() -> EvalCase:
+    """U1 需要两个子项同时命中，U2 只需要一个；用来区分「单元」与「子项」。"""
+    return EvalCase(
+        schema_version=LEGACY_SCHEMA_VERSION,
+        case_id="TXT-001",
+        question="交付流程有哪些节点？",
+        reference_answer="受理、审核、批准、归档。",
+        top_k=4,
+        answerable=True,
+        units=(
+            _unit("flow-a", "流程包含受理与审核", "受理", "审核"),
+            _unit("flow-b", "流程包含批准", "批准"),
+        ),
+        expected_documents=(DOCUMENT,),
+    )
 
 
-def test_deterministic_metrics_use_source_and_location() -> None:
-    """三项确定性指标只读 sources 与标注，回答内容不影响任何一项。"""
-    case = load_golden_dataset(
-        Path(__file__).resolve().parents[2] / "testdata" / "quality" / "golden_dataset.jsonl"
-    )[4]
-    source = {
-        "content": "ACCESS CODE: LIME-482",
-        "metadata": {
-            "documentId": "doc-1",
-            "originalFilename": "qa-rag-run-uuid-quality-corpus.md",
-            "ingestSource": "image_vision",
-            "imageSourceLocator": "assets/quality-ocr-badge.png",
-            "similarity": 0.91,
-        },
-    }
-    passed = evaluate_case(case, "访问码是 LIME-482。", [source])
-    # 此处只提供 1 条来源，Precision@K 的分母固定为 top_k，故等于 1/top_k。
-    assert passed == {
-        "recall_at_k": 1.0,
-        "precision_at_k": 1 / case.top_k,
-        "mrr": 1.0,
-    }
-    # 刻意给一个答错且编造的回答：结果必须与上面逐项相同，证明三项都在检索侧、
-    # 不看回答文本。回答质量现在完全由 DeepEval 那四项承担。
-    wrong_answer = evaluate_case(case, "访问码是 LIME-428，徽章已于上季度作废。", [source])
-    assert wrong_answer == passed
-    failed = evaluate_case(case, "访问码是 LIME-428。", [{**source, "metadata": {**source["metadata"], "imageSourceLocator": "wrong.png"}}])
-    assert failed["recall_at_k"] == 0.0
-    # Precision@K 只比文档归属、不看位置：该来源仍属于预期文档，所以仍记 1/top_k。
-    # 这正是它与 recall_at_k / mrr 的分工——后两者查「位置对不对」。
-    assert failed["precision_at_k"] == 1 / case.top_k
-    assert failed["mrr"] == 0.0
+def test_source_matches_translates_legacy_location_dict() -> None:
+    """兼容入口：位置字典仍然是「图片定位」或「正文入库」两种含义。"""
+    assert source_matches(_image_source("x"), DOCUMENT, {"imageLocator": BADGE})
+    assert not source_matches(_image_source("x", locator="other.png"), DOCUMENT, {"imageLocator": BADGE})
+    assert source_matches(_text_source("x"), DOCUMENT, {"ingestSource": "text_document"})
+    assert not source_matches(_image_source("x"), DOCUMENT, {"ingestSource": "text_document"})
+    # 文档名走后缀匹配：上传时会加 run 前缀，仍然要能命中。
+    assert source_matches(_text_source("x", document="qa-rag-run-1-测试.md"), DOCUMENT)
+    assert not source_matches(_text_source("x", document="noise-alpha.md"), DOCUMENT)
+
+
+def test_image_unit_needs_both_document_and_locator() -> None:
+    case = _image_case()
+    assert evaluate_case(case, "", [_image_source("访问码 LIME-482")])["recall_at_k"] == 1.0
+    # 图片定位错 -> 没覆盖；该片段也没支持任何所问事实 -> Precision@K 记 0。
+    wrong_locator = evaluate_case(case, "", [_image_source("访问码 LIME-482", locator="other.png")])
+    assert wrong_locator["recall_at_k"] == 0.0
+    assert wrong_locator["precision_at_k"] == 0.0
+    assert wrong_locator["mrr"] == 0.0
+    # 图片片段不能顶替正文证据：正文单元的 kind 会把它排除掉。
+    assert evaluate_case(_text_case(), "", [_image_source("流程包含受理与审核")])["recall_at_k"] == 0.0
+
+
+def test_recall_counts_units_and_accumulates_parts_across_snippets() -> None:
+    """单元内子项允许跨片段凑齐；同一单元只计一次分。"""
+    case = _text_case()
+    # U1 的两个子项只命中一个，不算覆盖。
+    assert evaluate_case(case, "", [_text_source("这里只讲受理")])["recall_at_k"] == 0.0
+    # 两条片段各讲一半，合起来才覆盖 U1；U2 仍然缺。
+    split = evaluate_case(case, "", [_text_source("这里只讲受理"), _text_source("这里只讲审核")])
+    assert split["recall_at_k"] == 0.5
+    assert evaluate_case(case, "", [_text_source("受理与审核"), _text_source("批准")])["recall_at_k"] == 1.0
+    # 同一单元被三条片段重复覆盖，也只算一个单元。
+    repeated = evaluate_case(case, "", [_text_source("批准"), _text_source("批准"), _text_source("批准")])
+    assert repeated["recall_at_k"] == 0.5
 
 
 def test_mrr_reflects_first_relevant_rank() -> None:
-    """MRR 补的是排序维度：Recall@K 只看「在不在 TopK 内」，MRR 看「排在第几」。
-
-    相关性判据与 Recall@K 同源，所以同一批 sources 下 recall_at_k == 1 而 MRR 仍可能
-    只有 0.33——这正是加它的理由。
-    """
-    cases = load_golden_dataset(
-        Path(__file__).resolve().parents[2] / "testdata" / "quality" / "golden_dataset.jsonl"
-    )
-    case = next(item for item in cases if item.case_id == "IMG-001")
-
-    def source(locator: str | None = None) -> dict:
-        metadata: dict = {"documentId": "doc-1", "originalFilename": "qa-rag-run-uuid-quality-corpus.md"}
-        if locator:
-            metadata["ingestSource"] = "image_vision"
-            metadata["imageSourceLocator"] = locator
-        else:
-            metadata["ingestSource"] = "text_document"
-        return {"content": "无关正文", "metadata": metadata}
-
-    relevant = source("assets/quality-ocr-badge.png")
-    irrelevant = source()
-
+    """MRR 补的是排序维度：Recall@K 只看「在不在 TopK 内」，MRR 看「排在第几」。"""
+    case = _image_case()
+    relevant = _image_source("访问码 LIME-482")
+    irrelevant = _text_source("与本题无关的正文")
     assert evaluate_case(case, "", [relevant])["mrr"] == 1.0
     assert evaluate_case(case, "", [irrelevant, relevant])["mrr"] == 0.5
     assert evaluate_case(case, "", [irrelevant, irrelevant, relevant])["mrr"] == pytest.approx(1 / 3)
     assert evaluate_case(case, "", [irrelevant, irrelevant])["mrr"] == 0.0
     assert evaluate_case(case, "", [])["mrr"] == 0.0
-    # 排在 TopK 之外的相关来源不算分：第 top_k+1 位起全部被截断。
+    # 排在 TopK 之外的相关片段不算分：第 top_k+1 位起全部被截断。
     assert evaluate_case(case, "", [irrelevant] * case.top_k + [relevant])["mrr"] == 0.0
-    # 排名靠后不影响 Recall@K，两者互补。
     ranked_late = evaluate_case(case, "", [irrelevant, relevant])
     assert ranked_late["recall_at_k"] == 1.0
     assert ranked_late["mrr"] == 0.5
-    # 无答案题不适用，不能返回 0 或 1，否则会稀释汇总均值。
-    no_answer = next(item for item in cases if item.question_type == "no_answer")
-    assert evaluate_case(no_answer, "资料未提供。", [])["mrr"] is None
+
+
+def test_precision_at_returned_uses_actual_return_count() -> None:
+    """少返回时 Precision@K 的分母被稀释，实际返回精度是它的配对指标。"""
+    case = _text_case()
+    one = evaluate_case(case, "", [_text_source("受理与审核")])
+    assert one["precision_at_k"] == 1 / case.top_k
+    assert one["precision_at_returned"] == 1.0
+    empty = evaluate_case(case, "", [])
+    assert empty["precision_at_returned"] is None
+    assert empty["precision_at_k"] == 0.0
+    # 未命中任何单元的片段仍然计入「实际返回」，所以这个指标能掉下来。
+    noise = evaluate_case(case, "", [_text_source("无关正文"), _text_source("批准")])
+    assert noise["precision_at_returned"] == 0.5
+
+
+def test_duplicate_content_keeps_rank_but_does_not_score_twice() -> None:
+    """同内容多分片占排名，但不能把 Precision@K 刷高。"""
+    case = _image_case()
+    duplicate = _image_source("访问码 LIME-482")
+    metrics = evaluate_case(case, "", [duplicate, dict(duplicate), dict(duplicate)])
+    assert metrics["recall_at_k"] == 1.0
+    assert metrics["precision_at_k"] == 1 / case.top_k
+    assert metrics["mrr"] == 1.0
 
 
 def test_no_answer_cases_have_no_deterministic_gate() -> None:
-    """已知缺口（刻意接受）：三项确定性指标对无答案题全部不适用。
+    """已知缺口（刻意接受）：四项指标对无答案题全部不适用。
 
-    删掉关键事实覆盖率后，无答案题在确定性层不再有任何约束——合理拒答和编造答案都会
-    得到三项 None，`deterministic_passed` 恒为真。这条断言把这个缺口钉住：如果以后有人
-    给它补了门禁，这里会失败，提醒同步更新 quality/README.md 与执行记录。
+    无答案题靠拒答判据单独评估，确定性层不设门禁；这条断言把缺口钉住，若以后
+    补了门禁，这里会失败，提醒同步更新口径文档与执行记录。
     """
-    cases = load_golden_dataset(
-        Path(__file__).resolve().parents[2] / "testdata" / "quality" / "golden_dataset.jsonl"
+    case = EvalCase(
+        schema_version="interview-notes-v1",
+        case_id="INTN-F-048",
+        question="生产环境到底部署了几个主节点？",
+        reference_answer="资料没有提供。",
+        top_k=4,
+        answerable=False,
+        question_type="no_answer",
+        refusal_rubric={"pass": ["明确说明资料未提供"]},
     )
-    no_answer = [item for item in cases if item.question_type == "no_answer"]
-    assert len(no_answer) == 3
-    for case in no_answer:
-        metrics = evaluate_case(case, "负责人出生于 2000 年。", [{"content": "无关内容", "metadata": {}}])
-        assert set(metrics.values()) == {None}, case.case_id
+    metrics = evaluate_case(case, "负责人出生于 2000 年。", [_text_source("无关内容")])
+    assert set(metrics.values()) == {None}
+    assert SCORING_VERSION == "evidence-v4"
 
 
 class _ServiceClient:
@@ -210,9 +214,12 @@ def test_report_keeps_detail_and_handles_partial_judge_results(tmp_path: Path) -
         actual_answer="脱敏回答",
         reference_answer="参考答案",
         sources=[],
-        deterministic_metrics={"recall_at_k": 1.0},
+        deterministic_metrics={"recall_at_k": 1.0, "precision_at_returned": 0.5},
         deepeval_metrics={"faithfulness": {"score": 0.8, "passed": True}},
         passed=True,
+        question_type="text",
+        topic="测试",
+        category="single",
     )
     partial = CaseResult(
         case_id="QA-002",
@@ -222,6 +229,9 @@ def test_report_keeps_detail_and_handles_partial_judge_results(tmp_path: Path) -
         sources=[],
         deterministic_metrics={"recall_at_k": 0.0},
         failure_reasons=["Judge 执行失败：RuntimeError"],
+        question_type="mixed",
+        topic="AI",
+        category="scenario",
     )
     jsonl_path, csv_path, summary_path = write_reports(
         [complete, partial], tmp_path, "safe-run", {"target_scope": "localhost"}
@@ -231,16 +241,52 @@ def test_report_keeps_detail_and_handles_partial_judge_results(tmp_path: Path) -
     assert [item["case_id"] for item in details] == ["QA-001", "QA-002"]
     assert csv_path.exists()
     assert summary["aggregate"]["recall_at_k"] == 0.5
+    assert summary["aggregate_evaluated_count"]["recall_at_k"] == 2
+    # 缺一项指标的题不能混进另一项的分母：缺失数单独记账，通过率只统计已评到的。
     assert summary["deepeval_aggregate"]["faithfulness"] == {
         "mean_score": 0.8,
-        "pass_rate": 0.5,
+        "pass_rate": 1.0,
         "evaluated_count": 1,
+        "applicable_count": 2,
+        "missing_count": 1,
+        "completion_rate": 0.5,
     }
+    # 分组维度进报告，避免用总均值掩盖某一类题全灭。
+    assert set(summary["groups"]) == {"question_type", "category", "topic"}
+    assert summary["groups"]["topic"]["测试"]["aggregate"]["recall_at_k"] == 1.0
+    assert summary["groups"]["category"]["scenario"]["passed_count"] == 0
 
 
 class _FailingUploadClient:
     async def upload_stream(self, _assets: list) -> list[dict]:
         raise RuntimeError("此错误正文不应写入报告")
+
+
+def _remove_tree(root: Path) -> None:
+    """删掉本用例自己造的空目录树；本机回收站通道不可靠，用逐项删除。"""
+    if not root.exists():
+        return
+    for current, directories, files in os.walk(root, topdown=False):
+        for name in files:
+            os.remove(Path(current) / name)
+        for name in directories:
+            os.rmdir(Path(current) / name)
+    try:
+        os.rmdir(root)
+    except OSError:
+        pass
+
+
+class _StubCorpus:
+    primary_assets = ["primary"]
+    noise_assets = ["noise"]
+    document_file_names = ["qa-rag-safe-run-x-corpus.md"]
+    noise_file_names = ["qa-rag-safe-run-x-noise.md"]
+
+
+def _stub_corpus_for(*_args, **_kwargs) -> _StubCorpus:
+    """替掉语料工厂：本用例只关心上传失败后的证据与清理登记，不关心素材怎么来。"""
+    return _StubCorpus()
 
 
 class _Registry:
@@ -252,7 +298,26 @@ class _Registry:
 
 
 @pytest.mark.asyncio
-async def test_setup_failure_still_builds_sanitized_case_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_setup_failure_still_builds_sanitized_case_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cases = (
+        _text_case(),
+        EvalCase(
+            schema_version=LEGACY_SCHEMA_VERSION, case_id="NA-001", question="没有这回事吧？",
+            reference_answer="资料未提供。", top_k=4, answerable=False, question_type="no_answer",
+        ),
+    )
+    (tmp_path / "cases.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "evidence_annotations.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "quality.runner.load_case_set",
+        lambda *_args, **_kwargs: CaseSet(
+            schema_version=LEGACY_SCHEMA_VERSION, dataset_dir=tmp_path,
+            cases_path=tmp_path / "cases.jsonl", cases=cases,
+        ),
+    )
+    monkeypatch.setattr("quality.runner.corpus_for", _stub_corpus_for)
     captured: list[CaseResult] = []
 
     def capture(results: list[CaseResult], *_args) -> None:
@@ -260,18 +325,29 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(tmp_path: Path
 
     monkeypatch.setattr("quality.runner.write_reports", capture)
     registry = _Registry()
-    results = await run_quality_evaluation(
-        _FailingUploadClient(),  # type: ignore[arg-type]
-        registry,  # type: ignore[arg-type]
-        "safe-run",
-        tmp_path,
-        1,
-        0.01,
-        False,
-        "localhost",
-    )
-    assert len(results) == 20
+    # run_id 必须唯一：runner 刻意拒绝覆盖已存在的报告目录，用固定 ID 会让这条
+    # 用例第二次跑就失败。跑完清掉自己造的空目录，不留垃圾。
+    run_id = "safe-" + uuid4().hex[:8]
+    try:
+        results = await run_quality_evaluation(
+            _FailingUploadClient(),  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+            run_id,
+            tmp_path,
+            1,
+            0.01,
+            False,
+            "localhost",
+        )
+    finally:
+        _remove_tree(Path(__file__).resolve().parents[2] / "reports" / "quality" / run_id)
+    assert len(results) == 2
     assert captured == results
-    assert registry.expected[0].startswith("qa-rag-safe-run-")
-    assert all(result.failure_reasons == ["RuntimeError"] for result in results)
-    assert all(result.bad_case_categories == ["上游模型或网络失败"] for result in results)
+    assert registry.expected[0] == "qa-rag-safe-run-x-corpus.md"
+    failed, not_applicable = results
+    assert failed.failure_reasons == ["RuntimeError"]
+    assert failed.bad_case_categories == ["上游模型或网络失败"]
+    # 无答案题不因上游失败被算成「失败题」，也不带失败原因。
+    assert not_applicable.evaluation_status == "not_applicable"
+    assert not_applicable.passed is None
+    assert not_applicable.failure_reasons == []

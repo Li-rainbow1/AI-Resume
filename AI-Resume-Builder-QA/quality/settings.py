@@ -4,10 +4,19 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from fixtures.config import QaSettings
+from quality.judge import JUDGE_ENV_KEYS, JUDGE_ENV_PREFIXES
 
 
 def enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def judge_env_configured() -> bool:
+    """任意一个前缀配齐即可——判分通道本身只认第一组配齐的配置。"""
+    return any(
+        all(os.getenv(f"{prefix}_{key}", "").strip() for key in JUDGE_ENV_KEYS)
+        for prefix in JUDGE_ENV_PREFIXES
+    )
 
 
 @dataclass(frozen=True, repr=False)
@@ -21,14 +30,13 @@ class QualitySettings:
 
     @classmethod
     def load(cls) -> "QualitySettings":
-        judge_names = ("DEEPEVAL_JUDGE_MODEL", "DEEPEVAL_JUDGE_BASE_URL", "DEEPEVAL_JUDGE_API_KEY")
         return cls(
             run_enabled=enabled("QA_RUN_RAG_QUALITY"),
             allow_writes=enabled("QA_ALLOW_QUALITY_WRITES"),
             real_models_confirmed=enabled("QA_QUALITY_REAL_MODELS_CONFIRMED"),
             allow_remote=enabled("QA_ALLOW_REMOTE_QUALITY"),
             deepeval_enabled=enabled("QA_RUN_DEEPEVAL"),
-            judge_configured=all(os.getenv(name, "").strip() for name in judge_names),
+            judge_configured=judge_env_configured(),
         )
 
     def skip_reason(self, qa_settings: QaSettings, require_judge: bool = False) -> str | None:
@@ -46,7 +54,11 @@ class QualitySettings:
         if require_judge and not self.deepeval_enabled:
             missing.append("QA_RUN_DEEPEVAL")
         if require_judge and not self.judge_configured:
-            missing.extend(["DEEPEVAL_JUDGE_MODEL", "DEEPEVAL_JUDGE_BASE_URL", "DEEPEVAL_JUDGE_API_KEY"])
+            missing.append(
+                "判分配置（"
+                + " 或 ".join(f"{prefix}_{key}" for prefix in JUDGE_ENV_PREFIXES for key in JUDGE_ENV_KEYS)
+                + "）"
+            )
         if missing:
             return "缺少质量评测环境变量：" + ", ".join(dict.fromkeys(missing))
         parsed = urlparse(qa_settings.base_url)

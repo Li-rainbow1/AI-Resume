@@ -20,11 +20,45 @@ def _aggregate_judge_metric(results: list[CaseResult], name: str) -> dict[str, f
         "completion_rate": len(values) / len(applicable) if applicable else None,
     }
 
+def _aggregate_deterministic(results: list[CaseResult], name: str) -> tuple[float | None, int]:
+    values = [
+        float(result.deterministic_metrics[name])
+        for result in results
+        if isinstance(result.deterministic_metrics.get(name), (int, float))
+    ]
+    return (sum(values) / len(values) if values else None), len(values)
+
+
+def _group_summary(results: list[CaseResult], field: str) -> dict[str, Any]:
+    """按题型 / 主题 / 模态分组，避免总均值掩盖某一类全灭。"""
+    buckets: dict[str, list[CaseResult]] = {}
+    for result in results:
+        key = str(getattr(result, field, "") or "未标注")
+        buckets.setdefault(key, []).append(result)
+    groups: dict[str, Any] = {}
+    for key, bucket in sorted(buckets.items()):
+        metric_names = sorted({name for item in bucket for name in item.deterministic_metrics})
+        aggregate: dict[str, float | None] = {}
+        evaluated: dict[str, int] = {}
+        for name in metric_names:
+            aggregate[name], evaluated[name] = _aggregate_deterministic(bucket, name)
+        groups[key] = {
+            "case_count": len(bucket),
+            "evaluated_count": sum(item.evaluation_status != "not_applicable" for item in bucket),
+            "not_applicable_count": sum(item.evaluation_status == "not_applicable" for item in bucket),
+            "passed_count": sum(item.passed is True for item in bucket),
+            "aggregate": aggregate,
+            "aggregate_evaluated_count": evaluated,
+        }
+    return groups
+
+
 def write_reports(
     results: list[CaseResult],
     report_root: Path,
     run_id: str,
     config_summary: dict[str, Any],
+    group_fields: tuple[str, ...] = ("question_type", "category", "topic"),
 ) -> tuple[Path, Path, Path]:
     report_root.mkdir(parents=True, exist_ok=True)
     jsonl_path = report_root / "case-results.jsonl"
@@ -36,7 +70,8 @@ def write_reports(
             stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
     metric_names = sorted({name for result in results for name in result.deterministic_metrics})
     judge_names = sorted({name for result in results for name in result.deepeval_metrics})
-    columns = ["case_id", "evaluation_status", "passed", "failure_reasons", "bad_case_categories", *metric_names, *judge_names]
+    columns = ["case_id", "evaluation_status", "passed", "question_type", "category", "topic",
+               "failure_reasons", "bad_case_categories", *metric_names, *judge_names]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
@@ -45,6 +80,9 @@ def write_reports(
                 "case_id": result.case_id,
                 "passed": result.passed,
                 "evaluation_status": result.evaluation_status,
+                "question_type": result.question_type,
+                "category": result.category,
+                "topic": result.topic,
                 "failure_reasons": "；".join(result.failure_reasons),
                 "bad_case_categories": "；".join(result.bad_case_categories),
                 **result.deterministic_metrics,
@@ -54,13 +92,7 @@ def write_reports(
     aggregate: dict[str, float | None] = {}
     aggregate_evaluated_count: dict[str, int] = {}
     for name in metric_names:
-        values = [
-            float(result.deterministic_metrics[name])
-            for result in results
-            if isinstance(result.deterministic_metrics.get(name), (int, float))
-        ]
-        aggregate[name] = sum(values) / len(values) if values else None
-        aggregate_evaluated_count[name] = len(values)
+        aggregate[name], aggregate_evaluated_count[name] = _aggregate_deterministic(results, name)
     deepeval_aggregate = {name: _aggregate_judge_metric(results, name) for name in judge_names}
     summary = {
         "run_id": run_id,
@@ -73,6 +105,7 @@ def write_reports(
         "aggregate": aggregate,
         "aggregate_evaluated_count": aggregate_evaluated_count,
         "deepeval_aggregate": deepeval_aggregate,
+        "groups": {field: _group_summary(results, field) for field in group_fields},
         "config_summary": config_summary,
     }
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

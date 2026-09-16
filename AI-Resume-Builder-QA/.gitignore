@@ -51,3 +51,8 @@ Thumbs.db
 # 性能素材的旧产物与未被 manifest 引用的中间图：留在本地便于重生成，但不入库
 testdata/performance/image_parser/six-images.pdf
 testdata/performance/image_parser/assets/source-page-09-image-02.ppm
+
+# 质量评测语料只在本地制作与使用：资料是第三方笔记正文与插图，按数据集说明
+# （testdata/quality/interview-notes-v1/资料问题与接入说明.md「入库前处理」）
+# 不入库、不推送、不发布。依赖它的契约用例在语料缺失时自动 skip。
+testdata/quality/

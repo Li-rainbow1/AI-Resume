@@ -15,6 +15,11 @@ from clients.rag import RagClient, UploadAsset
 from fixtures.config import QaSettings
 from fixtures.lifecycle import CreatedDocumentRegistry
 from quality.deepeval_adapter import judge_config_summary
+from quality.freeze import FREEZE_MANIFEST_NAME, read_manifest as read_freeze_manifest
+from quality.freeze import verify_files as verify_frozen_files
+from quality.freeze import verify_judge as verify_frozen_judge
+from quality.freeze import verify_services as verify_frozen_services
+from quality.judge import judge_config_from_environment
 from quality.runtime_guard import real_model_guard_reason
 from quality.settings import QualitySettings
 
@@ -29,23 +34,33 @@ def error_types(error):
     return result
 
 
+def shared_judge_sha256():
+    """三条链路共用同一份 Judge 实现，指纹也要一起算，不能只算某个入口文件。"""
+    digest = hashlib.sha256()
+    for name in ("judge.py", "deepeval_judge.py"):
+        digest.update(name.encode())
+        digest.update(Path(__file__).with_name(name).read_bytes())
+    return digest.hexdigest()
+
+
 def runtime_judge_config():
-    return {**judge_config_summary(), "adapter": "interview-json-schema-v1",
-            "enable_thinking": False,
-            "request_timeout_seconds": 60, "sdk_max_retries": 0,
+    """Judge 运行时配置：通道事实全部来自 `JudgeConfig`，本函数不再重复硬编码。"""
+    return {**judge_config_summary(), "adapter": "shared-json-schema-v1",
             "faithfulness_penalize_ambiguous_claims": True,
-            "adapter_sha256": hashlib.sha256(Path(__file__).with_name("interview_judge.py").read_bytes()).hexdigest()}
+            "adapter_sha256": shared_judge_sha256()}
 
 
 def evaluate_reply(question, reply, context):
     """只评真实 assistantReply；参考答案不注入模型依据。"""
-    os.environ["DEEPEVAL_DISABLE_DOTENV"] = "1"
     from deepeval.metrics import FaithfulnessMetric, AnswerRelevancyMetric
-    from quality.interview_judge import InterviewJudge
     from deepeval.test_case import LLMTestCase
+    from quality.interview_judge import InterviewJudge
 
-    config = judge_config_summary()
-    model = InterviewJudge()
+    # 配置只解析一次：Judge 模型与报告摘要必须是同一份配置，
+    # 否则报告会记下与实际请求不同的端点。
+    resolved = judge_config_from_environment()
+    config = judge_config_summary(resolved)
+    model = InterviewJudge(resolved)
     case = LLMTestCase(input=question, actual_output=reply, retrieval_context=context)
     scores = {}
     # Faithfulness 默认把「依据不足（idk）」的陈述也计入得分，判分偏松；
@@ -60,7 +75,9 @@ def evaluate_reply(question, reply, context):
                              **metric_options.get(name, {}))
             metric.measure(case)
             if metric.score is None:
-                raise ValueError("Judge 未返回分数")
+                # 与 deepeval_adapter 同一失败口径：把 metric.error 带出来，
+                # 免得「判分器没给分」只留一个看不出原因的裸异常。
+                raise RuntimeError(f"{type(metric).__name__} 未返回分数：{metric.error or '未记录原因'}")
             values.append(float(metric.score))
             reasons.append(str(metric.reason or ""))
         scores[name] = {"score": sum(values) / len(values), "scores": values, "reasons": reasons,
@@ -159,18 +176,14 @@ async def run(case_ids=None, judge=True):
         guard = await real_model_guard_reason(rag)
         if guard or await rag.list_all_documents():
             raise ValueError(guard or "QA 知识库非空，拒绝混入其他数据")
-        manifest = json.loads((dataset / "freeze-manifest.json").read_text(encoding="utf-8"))
-        for base, entries in ((dataset, manifest["files_sha256"]), (Path.cwd(), manifest["qa_code_sha256"])):
-            for name, digest in entries.items():
-                target = (base / name).resolve()
-                if not target.is_relative_to(base.resolve()) or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-                    raise ValueError("面试评测冻结文件发生变化")
-        if judge and manifest.get("interview_judge") != runtime_judge_config():
-            raise ValueError("面试 Judge 与冻结配置不一致")
+        manifest = read_freeze_manifest(dataset)
+        if manifest is None:
+            raise ValueError(f"面试评测缺少冻结清单：{dataset / FREEZE_MANIFEST_NAME}")
+        # 键相对 QA 仓库根，用 __file__ 推而不是 cwd：从别的目录启动时不该换一套基准。
+        verify_frozen_files(dataset, Path(__file__).resolve().parents[1], manifest)
+        verify_frozen_judge(manifest, "interview_judge", runtime_judge_config() if judge else None)
         actual_services = {r["serviceKey"]: r.get("config") or {} for r in await rag.list_system_services()}
-        for key, expected in manifest["services"].items():
-            if any(actual_services.get(key, {}).get(name) != value for name, value in expected.items()):
-                raise ValueError("面试模型或检索配置与冻结版本不一致")
+        verify_frozen_services(manifest, actual_services)
         config["services"] = [{"serviceKey": r["serviceKey"], "model": (r.get("config") or {}).get("model")}
                               for r in await rag.list_system_services() if r["serviceKey"] in {"chat", "embedding", "vision"}]
         registry = CreatedDocumentRegistry(expected_prefix=f"qa-rag-{settings.run_id}-")

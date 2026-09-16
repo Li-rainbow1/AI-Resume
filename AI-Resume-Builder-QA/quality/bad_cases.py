@@ -1,11 +1,23 @@
 from typing import Any
 
-from quality.metrics import source_matches
-from quality.models import GoldenCase
+from quality.models import EvalCase
+from quality.sources import view_source
+
+
+def _document_hit(case: EvalCase, sources: list[dict[str, Any]]) -> bool:
+    """是否至少有一条来源落在预期文档上；多文档题命中任意一篇即可。"""
+    if not case.expected_documents:
+        return False
+    return any(
+        view.document_matches(expected)
+        for source in sources
+        for view in [view_source(source)]
+        for expected in case.expected_documents
+    )
 
 
 def classify_bad_case(
-    case: GoldenCase,
+    case: EvalCase,
     answer: str,
     sources: list[dict[str, Any]],
     metrics: dict[str, float | None],
@@ -16,8 +28,8 @@ def classify_bad_case(
     reasons: list[str] = []
     if upstream_error:
         return ["上游模型或网络失败"], [upstream_error]
-    document_hit = any(source_matches(source, case.expected_document) for source in sources)
-    if case.question_type != "no_answer" and not document_hit:
+    document_hit = _document_hit(case, sources)
+    if case.answerable and not document_hit:
         categories.append("文档未命中")
         reasons.append("sources 未命中预期文档")
     if document_hit and metrics["recall_at_k"] is not None and metrics["recall_at_k"] < 1:
