@@ -9,6 +9,11 @@
   「校验比生成宽松」，等于门禁静默失效。这里的往返测试就是钉住这一点：生成器产出的
   清单必须能被门禁逐项核过；数据集/代码被动过一个字节，门禁必须拒绝。
 - **清单自己不参与冻结**。否则每写一次清单，上一次的校验就必然失败。
+- **判分配置的比对口径**：整体相等，但 `env_prefix`（本地从哪组环境变量读配置）不进比对，
+  `deepeval_version` 只比 `major.minor`。放宽的只有这两处，其余字段（含以后新增的）照旧
+  逐个比对——`test_verify_judge_still_catches_endpoint_and_recipe_changes` 就是防「顺手放宽」。
+- **生成器不许默默写 `judge: null`**。那种清单跑不了判分轮（门禁找不到 `judge` 直接拒绝），
+  却能跑通确定性轮，最容易被当成「冻结成功」。缺判分口径时必须显式声明只冻确定性轮。
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import pytest
 from quality.freeze import (
     FREEZE_HISTORY_DIR,
     FREEZE_MANIFEST_NAME,
+    comparable_judge,
     file_hashes,
     iter_code_files,
     iter_dataset_files,
@@ -37,11 +43,32 @@ QA_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = QA_ROOT / "scripts" / "freeze_quality_dataset.py"
 DATASET = QA_ROOT / "testdata" / "quality" / "interview-notes-v1"
 
+# 生成器用例跑在真实数据集上，而语料只在本地保留（`.gitignore` 忽略 `testdata/quality/`）
+# ⇒ 语料不在时**跳过**，而不是把「这台机器没有本地语料」误报成实现坏了。
+requires_local_corpus = pytest.mark.skipif(
+    not DATASET.is_dir(),
+    reason=f"{DATASET.name} 语料只在本地保留、不入库；跳过依赖真实语料的用例",
+)
+
 _FAKE_SERVICES = [
     {"serviceKey": "chat", "config": {"model": "deepseek-chat", "temperature": 0.0}},
     {"serviceKey": "embedding", "config": {"model": "bge-m3"}},
     {"serviceKey": "vision", "config": {"model": "qwen-vl-max"}},
 ]
+
+
+@pytest.fixture()
+def judge_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把判分口径固定成 `DEEPEVAL_JUDGE_*`，让生成器用例不随这台机器的环境变量变。
+
+    前缀优先级是 `QUALITY_JUDGE` 在前，所以必须先把那组清掉：本机若配了它，这里设的
+    值会被覆盖，`env_prefix` 与断言就随机器而变。
+    """
+    for name in ("MODEL", "BASE_URL", "API_KEY", "THRESHOLD", "REPEAT_COUNT"):
+        monkeypatch.delenv(f"QUALITY_JUDGE_{name}", raising=False)
+    monkeypatch.setenv("DEEPEVAL_JUDGE_MODEL", "judge-model")
+    monkeypatch.setenv("DEEPEVAL_JUDGE_BASE_URL", "https://judge.example.com/v1")
+    monkeypatch.setenv("DEEPEVAL_JUDGE_API_KEY", "test-key")
 
 
 def _load_generator():
@@ -247,6 +274,59 @@ def test_verify_judge_uses_the_caller_supplied_key() -> None:
         verify_judge({"judge": declared}, "interview_judge", dict(declared))
 
 
+# 一份典型的判分块：端点、配方、版本都齐全。
+_BASE_JUDGE = {
+    "model": "judge-model",
+    "base_url": "https://judge.example.com/v1",
+    "env_prefix": "DEEPEVAL_JUDGE",
+    "threshold": 0.5,
+    "repeat_count": 1,
+    "deepeval_version": "4.1.4",
+}
+
+
+def test_verify_judge_ignores_the_env_prefix() -> None:
+    """前缀只说明本地从哪组环境变量读到配置，换名而取值不变不算口径变化。"""
+    verify_judge({"judge": _BASE_JUDGE}, "judge", {**_BASE_JUDGE, "env_prefix": "QUALITY_JUDGE"})
+
+
+def test_verify_judge_ignores_a_patch_version_bump() -> None:
+    """补丁版是修 bug，不该把已经冻好的报告判成「口径变了」。"""
+    verify_judge({"judge": _BASE_JUDGE}, "judge", {**_BASE_JUDGE, "deepeval_version": "4.1.9"})
+
+
+def test_verify_judge_catches_a_minor_version_bump() -> None:
+    """次版本可能改判分提示词，必须拦。"""
+    with pytest.raises(ValueError, match="Judge 配置"):
+        verify_judge({"judge": _BASE_JUDGE}, "judge", {**_BASE_JUDGE, "deepeval_version": "4.2.0"})
+
+
+def test_verify_judge_still_catches_endpoint_and_recipe_changes() -> None:
+    """放宽的只有前缀与补丁版；端点、模型、阈值变了照拦（默认收紧）。"""
+    for changed in (
+        {"model": "别的模型"},
+        {"base_url": "https://other.example.com/v1"},
+        {"threshold": 0.9},
+        {"repeat_count": 3},
+    ):
+        with pytest.raises(ValueError, match="Judge 配置"):
+            verify_judge({"judge": _BASE_JUDGE}, "judge", {**_BASE_JUDGE, **changed})
+
+
+def test_verify_judge_still_requires_every_key() -> None:
+    """少一个键仍然算不一致：放宽不等于改成子集比对。"""
+    with pytest.raises(ValueError):
+        verify_judge({"judge": _BASE_JUDGE}, "judge", {"model": "judge-model"})
+
+
+def test_comparable_judge_drops_only_the_documented_fields() -> None:
+    comparable = comparable_judge(_BASE_JUDGE)
+    assert "env_prefix" not in comparable
+    assert comparable["deepeval_version"] == "4.1"
+    # 其余字段一个不少：以后新增的字段会自动进比对，不需要记得回来改这一层。
+    assert set(comparable) == set(_BASE_JUDGE) - {"env_prefix"}
+
+
 # --- 生成器：归档与自校验 ---------------------------------------------------
 
 
@@ -267,7 +347,8 @@ def test_archive_previous_copies_bytes_and_returns_sha(tmp_path: Path) -> None:
     assert not (empty / FREEZE_HISTORY_DIR).exists()
 
 
-def test_generator_manifest_satisfies_the_gate(generator) -> None:
+@requires_local_corpus
+def test_generator_manifest_satisfies_the_gate(judge_env, generator) -> None:
     """往返：生成器算出的清单，必须能被门禁逐项核过。"""
     manifest = generator.build_manifest(
         DATASET, QA_ROOT, split=None, services=_FAKE_SERVICES, previous=None, previous_sha256=None
@@ -275,6 +356,8 @@ def test_generator_manifest_satisfies_the_gate(generator) -> None:
 
     verify_files(DATASET, QA_ROOT, manifest)
     verify_services(manifest, manifest["services"])
+    # 判分块也要能被门禁按同一套口径核过，否则每轮都得手改清单。
+    verify_judge(manifest, "judge", dict(manifest["judge"]))
 
     assert set(manifest["services"]) == {"chat", "embedding", "vision"}
     assert manifest["files_sha256"], "数据集一个文件都没冻上"
@@ -287,7 +370,8 @@ def test_generator_manifest_satisfies_the_gate(generator) -> None:
     )["revision"]
 
 
-def test_generator_manifest_catches_dataset_change(generator) -> None:
+@requires_local_corpus
+def test_generator_manifest_catches_dataset_change(judge_env, generator) -> None:
     """数据集被动过一个字节，门禁必须拒绝（用改声明的哈希来模拟漂移）。"""
     manifest = generator.build_manifest(
         DATASET, QA_ROOT, split=None, services=_FAKE_SERVICES, previous=None, previous_sha256=None
@@ -299,7 +383,8 @@ def test_generator_manifest_catches_dataset_change(generator) -> None:
         verify_files(DATASET, QA_ROOT, manifest)
 
 
-def test_generator_records_previous_revision_when_rewriting(generator) -> None:
+@requires_local_corpus
+def test_generator_records_previous_revision_when_rewriting(judge_env, generator) -> None:
     previous = {"revision": "abc123"}
     manifest = generator.build_manifest(
         DATASET,
@@ -313,7 +398,8 @@ def test_generator_records_previous_revision_when_rewriting(generator) -> None:
     assert manifest["previous_manifest_sha256"] == "d" * 64
 
 
-def test_generator_refuses_to_freeze_when_a_service_is_absent(generator) -> None:
+@requires_local_corpus
+def test_generator_refuses_to_freeze_when_a_service_is_absent(judge_env, generator) -> None:
     with pytest.raises(SystemExit, match="embedding"):
         generator.build_manifest(
             DATASET,
@@ -323,6 +409,52 @@ def test_generator_refuses_to_freeze_when_a_service_is_absent(generator) -> None
             previous=None,
             previous_sha256=None,
         )
+
+
+@requires_local_corpus
+@pytest.mark.parametrize("half_configured_prefix", ["QUALITY_JUDGE", "DEEPEVAL_JUDGE"])
+def test_generator_refuses_to_freeze_without_a_judge_config(
+    monkeypatch: pytest.MonkeyPatch, half_configured_prefix: str, generator
+) -> None:
+    """判分环境变量没配全时**默认失败**，不允许默默写个 `judge: null` 就当冻好了。
+
+    那种清单跑不了判分轮（门禁找不到 `judge` 会直接拒绝），却能跑通确定性轮，最容易被
+    当成「冻结成功」，等要出分数时才发现白冻一次。
+    """
+    for name in ("MODEL", "BASE_URL", "API_KEY"):
+        monkeypatch.delenv(f"QUALITY_JUDGE_{name}", raising=False)
+        monkeypatch.delenv(f"DEEPEVAL_JUDGE_{name}", raising=False)
+    # 故意留一个「配了一半」的前缀：缺哪个变量必须点名报出来，而不是当没配过。
+    monkeypatch.setenv(f"{half_configured_prefix}_MODEL", "half-configured")
+
+    with pytest.raises(SystemExit, match="判分环境变量未配全"):
+        generator.build_manifest(
+            DATASET, QA_ROOT, split=None, services=_FAKE_SERVICES, previous=None, previous_sha256=None
+        )
+
+
+@requires_local_corpus
+def test_generator_records_no_judge_only_when_explicitly_asked(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, generator
+) -> None:
+    """显式声明只冻确定性轮时才记 `judge: null`，并且必须把后果说清楚。"""
+    for name in ("MODEL", "BASE_URL", "API_KEY"):
+        monkeypatch.delenv(f"QUALITY_JUDGE_{name}", raising=False)
+        monkeypatch.delenv(f"DEEPEVAL_JUDGE_{name}", raising=False)
+
+    manifest = generator.build_manifest(
+        DATASET,
+        QA_ROOT,
+        split=None,
+        services=_FAKE_SERVICES,
+        previous=None,
+        previous_sha256=None,
+        deterministic_only=True,
+    )
+
+    assert manifest["judge"] is None
+    assert manifest["revision"], "少冻一项事实也要留 revision，便于历史归档比对"
+    assert "不能" in capsys.readouterr().err, "必须警告这份清单跑不了判分轮"
 
 
 def test_generator_loads_services_from_array_or_wrapped_object(tmp_path: Path, generator) -> None:

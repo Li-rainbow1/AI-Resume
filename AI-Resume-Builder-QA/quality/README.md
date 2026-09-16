@@ -80,10 +80,10 @@ Mock AI 仅服务接口契约、异常和性能测试，不生成 AI/RAG 质量�
 `interview-notes-v1` 的编排有三条硬约束，都由 `tests/quality/test_corpus_orchestration.py` 钉住：
 
 1. **正文与附件必须同一批上传，且附件的 `relativePath` 等于正文里的 Markdown 相对路径**（`附件/<原名>`，不是数据集相对路径 `corpus/附件/<原名>`）。后端靠上传 manifest 的 `relativePath` 把附件挂到正文；路径写错不报错，只会让图片静默挂不上、图片题永久无解。
-2. **正文逐字节复制**（仅文件名加 run 前缀）。数据集声明的 `sha256` 是证据行号可信的前提。
+2. **正文与数据集声明的 `sha256` 逐字节一致**（落盘时仅文件名加 run 前缀，并逐文件核对）。哈希是证据行号可信的前提。唯一一次有意的改写（`6-计算机网络.md` 第 74 行的 Obsidian `![[...]]` → 常规 Markdown 链接）发生在**冻结生成时**，已记入 `corpus_manifest.json` 的 `transformations`（含 before/after 哈希）；行数不变，所以证据行号仍成立。运行期不许再改正文。
 3. **每个附件都要有归属**：要么被正文引用，要么被 `expected_unreferenced_attachments` 点名为已知的未引用项。逐篇轮询完的 `referenced_total` 之和与附件总数之差必须**恰好等于**声明的例外数，不等就中止本轮。
 
-当前唯一的例外是 `附件/Pasted image 20260818090016.png`：它在 `6-计算机网络.md` 里只用 Obsidian 写法 `![[...]]` 引用，而后端的 `markdown_attachment_service` 只认 `![](path)` / `![][label]` / `![label]` 三种写法，因此解析不到。核对过全部 8 个图片证据单元后确认**没有任何一题依赖它**，所以选择不改造正文（改造只会让已冻结的语料哈希无意义地漂移），而是把它登记为显式例外。
+`interview-notes-v1` 声明的例外是**空集**：原先 `附件/Pasted image 20260818090016.png` 只被 Obsidian 写法 `![[...]]` 引用，而后端 `markdown_attachment_service` 只认 `![](path)` / `![][label]` / `![label]` 三种写法，解析不到。核对过全部 8 个图片证据单元、确认没有任何一题依赖它之后，改为在冻结生成时把这一处链接归一化（而不是留一张挂不上正文的无归属附件），于是 64 张附件全部有正文归属。声明位保留：将来真出现挂不上的附件必须点名，点名项若从素材里消失则报错。
 
 > **语料只在本地保留，不入库。** `testdata/quality/` 由 `.gitignore` 排除——资料是第三方笔记正文与插图，按数据集自己的说明（`资料问题与接入说明.md`「入库前处理」）只在本地制作，不提交、不推送、不发布。因此依赖真实语料的 3 条契约用例带 skip 守卫：语料不在时**跳过**，而不是把「这台机器没有本地语料」误报成实现坏了。其余用例现场构造数据集与语料，任何机器都能跑。
 
@@ -207,7 +207,8 @@ Judge 必须与待测 Chat 模型**异构**：同源同模型等于自评，分�
 3. **阈值与重复次数跟着生效前缀走**：`<前缀>_THRESHOLD` / `<前缀>_REPEAT_COUNT`，该前缀没配则回落 `DEEPEVAL_JUDGE_*`。
 4. **重试语义**：SDK 不重试；`DeepEvalJudgeLLM` 只在「返回了但结构不合法」时重试到 `max_attempts`（默认 3，`<前缀>_MAX_ATTEMPTS` 可调），网络与鉴权错误直接抛出——与 `SemanticMatcher` 的策略一致。原先 GPTModel 那条路径带 deepeval 重试 + SDK 默认重试，代价是失败面被拖长。
 5. **「判分器没给分」的失败口径两条链路一致**：`deepeval_adapter` 与 `interview_runner` 都抛 `RuntimeError` 并带出 `metric.error`，不再出现「一处有原因、一处只有裸 `ValueError`」。
-6. **冻结清单的 `judge` / `interview_judge` 块要按新形状重生成。** `runner.py` 与 `interview_runner.py` 拿运行时摘要与清单做**整体相等**比对；统一后摘要新增了 `temperature` / `response_format` / `enable_thinking` / `sdk_max_retries` / `max_attempts` / `request_timeout_seconds` / `env_prefix` 七项，按旧形状写好的清单会被判「Judge 配置与冻结版本不一致」。当前仓库内还没有任何 `freeze-manifest.json`（新数据集尚未冻结），因此这是**待触发**项：第一次冻结时照新形状生成即可。注意 `env_prefix` 与 `deepeval_version` 也在比对范围内——改个环境变量前缀名、或升级 deepeval 补丁版，都会让冻结门禁判定「口径变了」，而端点与配方其实一字未改；如觉得过严，应把比对改成只比端点与配方字段。
+6. **冻结清单的 `judge` / `interview_judge` 块要按新形状重生成。** `runner.py` 与 `interview_runner.py` 拿运行时摘要与清单做**整体相等**比对；统一后摘要新增了 `temperature` / `response_format` / `enable_thinking` / `sdk_max_retries` / `max_attempts` / `request_timeout_seconds` / `env_prefix` 七项，按旧形状写好的清单会被判「Judge 配置与冻结版本不一致」。当前仓库内还没有任何 `freeze-manifest.json`（新数据集尚未冻结），因此这是**待触发**项：第一次冻结时照新形状生成即可。
+   - ✅ 原先记的「`env_prefix` 与 `deepeval_version` 也在比对范围内、改前缀名或升补丁版都会误报」已修（2026-09-16）：比对改为 `quality/freeze.py::comparable_judge`——`env_prefix` 不比，`deepeval_version` 只比 `major.minor`，其余字段（含以后新增的）仍然逐个比对。见「冻结清单」节的四条约定。
 
 另有一条**指标口径**上的非对称，来自 deepeval 自身实现，不是本项目引入：Judge 返回空 verdict 列表时，`Contextual Recall` / `Contextual Relevancy` 记 **0 分**，而 `Faithfulness` / `Answer Relevancy` 记 **满分**。即同一份异常输出会同时「误杀缺/杂」与「误放编/偏」。空回答本身已被 `measure()` 的 `actual_output` 校验拦成 `MissingTestCaseParamsError`（不会走到这条路径），但「回答非空、claims 抽不出来」仍会白拿满分。
 
@@ -224,20 +225,26 @@ Judge 必须与待测 Chat 模型**异构**：同源同模型等于自评，分�
 | `files_sha256` | 数据集目录 | 数据集内全部文件（排除清单自身、`freeze-history/`、`__pycache__`） | 逐文件字节哈希 |
 | `qa_code_sha256` | QA 仓库根 | `quality/`、`clients/`、`fixtures/` 下的 `.py` + `compose.interview-quality.yml` | 逐文件字节哈希 |
 | `services` | — | 被测系统的 `chat` / `embedding` / `vision` 的 `config` | 只比清单点名的键 |
-| `judge` / `interview_judge` | — | 判分通道模型、地址、请求配方、阈值、重复次数 | **整体相等** |
+| `judge` / `interview_judge` | — | 判分通道模型、地址、请求配方、阈值、重复次数 | **整体相等**；但 `env_prefix` 不比、`deepeval_version` 只比 `major.minor`（见下） |
 
 另有 `revision`（上述全部事实的指纹，不含自身）与 `previous_manifest_sha256` / `previous_manifest_revision`（说明上一版是什么）。
 
-三条实现约定：
+判分配置的比对口径（`quality/freeze.py::comparable_judge`）是**默认收紧**：除下面两处外，任何字段——包括以后新增的——都要完全相等。
+
+- **`env_prefix` 不进比对**。它只说明本地从哪组环境变量读到配置（`QUALITY_JUDGE_*` 还是 `DEEPEVAL_JUDGE_*`），是本地命名；真正决定口径的端点、模型、请求配方本来就逐个比对，前缀换名而取值不变不算口径变化。
+- **`deepeval_version` 只比 `major.minor`**。补丁版是修 bug，不该把已经冻好的报告判成「口径变了」；次版本可能改判分提示词，所以不放开。
+
+四条实现约定：
 
 1. **生成方与校验方共用一套「该冻哪些文件、怎么算哈希」**（`quality/freeze.py`）。两边各维护一份的话，漂移方向永远是「校验比生成宽松」，等于门禁静默失效。`tests/quality/test_freeze_manifest.py::test_generator_manifest_satisfies_the_gate` 就是钉住这个往返。
 2. **清单自己不参与冻结**，否则每写一次清单就会让上一次的校验失败。
-3. **清单一律 CRLF + 无末尾换行**。门禁算的是 `read_bytes()` 的 sha256，本仓库的源码是 CRLF 与裸 LF 混合（`metrics.py` 混合、`reporting.py` 纯 CRLF），用编辑器随手保存一次就会让哈希全变。
+3. **冻结覆盖面必须钉成 LF**（`AI-Resume-Builder-QA/.gitattributes`：`*.py text eol=lf` + `compose.interview-quality.yml`）。门禁算的是 `read_bytes()` 的 sha256，本机 `core.autocrlf=true`；不钉的话「最近一次 `git checkout`」就能让 `qa_code_sha256` 变化而代码一字未改。清单**自身**仍按 **CRLF + 无末尾换行** 写——它是脚本产物、不参与自己的校验。
+4. **缺判分口径时不生成清单**。生成器默认在判分环境变量没配全时**直接失败**；只冻确定性轮必须显式加 `--deterministic-only`，且会在 stderr 上警告这份清单跑不了判分轮。
 
 一个**不对称的地方**必须记住：
 
 - **确定性轮（`runner.py`）可以没有清单**——没有清单就直接跳过冻结校验（只是报告里 `freeze_manifest_sha256` 为 `null`）。
-- **面试轮（`interview_runner.py`）必须有清单**——清单不存在直接报错。它是拿去做对外结论的那条链路。
+- **面试轮（`interview_runner.py`）必须有清单**——清单不存在直接报错。它是拿去做对外结论的那条链路。**「原样重评」也走同一道门禁**（`--score-saved`）：重评只核数据集文件、评测代码与判分器，**不核 `services`**——重评不发任何被测系统请求、也不重新检索，被测服务的配置不在这一轮的因果链上（它属于采集轮）。少了这道校验，重评就是一条绕过门禁的路：换个 Judge 端点重评同一份采集结果，分数照样能写进报告而没人拦。
 
 生成方式（在 QA 仓库根目录执行，**需要隔离栈在线**——`--dry-run` 也要抓 `services`，它同样受「抓不到就报错」约束；离线改用 `--services-json`）：
 
@@ -250,6 +257,9 @@ Judge 必须与待测 Chat 模型**异构**：同源同模型等于自评，分�
 
 # 离线冻结：services 用事先抓好的接口响应
 .\.venv\Scripts\python.exe scripts\freeze_quality_dataset.py --services-json captured\system-services.json
+
+# 只冻确定性轮（判分环境变量未配全时明确放行，清单里记 judge=null）
+.\.venv\Scripts\python.exe scripts\freeze_quality_dataset.py --deterministic-only
 ```
 
 生成器会先自校验（用与门禁完全相同的实现核一遍刚生成的清单），再把已有清单**逐字节**归档到 `<数据集>/freeze-history/before-<sha8>.json` 后才落盘。`services` 只能来自被测系统本身，抓不到就报错——不要用空对象糊过去，空对象会让这层校验静默失效。**改数据集或改评分代码后必须重新冻结。**

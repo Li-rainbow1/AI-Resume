@@ -1,0 +1,21 @@
+# 冻结清单按 `read_bytes()` 的 sha256 比对冻结文件（见 `quality/freeze.py`），所以这批路径
+# 必须**与平台、检出状态无关地落到 LF**。
+#
+# 起因：本机 `core.autocrlf=true`，而此前全仓没有属性文件 ⇒ 同一份提交在不同检出状态下
+# 磁盘字节不同。2026-09-16 实测：`quality/models.py`、`quality/reporting.py`、
+# `quality/bad_cases.py` 的工作区是纯 CRLF，而它们在 git 里的 blob 是 LF。于是
+# `qa_code_sha256` 会随「最近一次 checkout」变化，门禁报「正式评测冻结文件不一致」，
+# 而代码一个字没改。显式钉死 eol 之后，检出字节 = blob 字节 = LF。
+#
+# 冻结覆盖面 = `quality/freeze.py` 的 `_FROZEN_CODE_DIRS`（quality / clients / fixtures）
+# 下的 `.py` + `_FROZEN_CODE_FILES`（compose.interview-quality.yml）。这里干脆钉**全部**
+# `.py`（含 scripts/、tests/）：它们不参与冻结，但同一个仓里不该有两种换行风格；更重要的
+# 是将来把某个目录纳入冻结时，不会因为「忘了来改这一行」而留下一个能被换行悄悄改掉哈希
+# 的缺口。新增非 `.py` 的冻结文件时，记得同步下面那行。
+#
+# 为什么不钉业务仓库那半边：那边有 `.bat` / `.ps1` 这类需要 CRLF 的文件，全局改会把大量
+# 无关文件卷进换行变更。本文件在 QA 子目录下，只作用于 QA 这半边。
+*.py text eol=lf
+compose.interview-quality.yml text eol=lf
+# 属性文件自身也钉住：否则下次检出它会翻成 CRLF，在 git status 里留一个假改动。
+.gitattributes text eol=lf

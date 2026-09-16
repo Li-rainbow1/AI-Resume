@@ -23,6 +23,10 @@ from quality.judge import judge_config_from_environment
 from quality.runtime_guard import real_model_guard_reason
 from quality.settings import QualitySettings
 
+# 面试评测的数据集。它与 RAG 质量评测集不是同一份，各自在自己的目录里冻一份清单；
+# 采集与「原样重评」都必须锚在同一个目录上，否则重评会拿另一份清单去核。
+INTERVIEW_DATASET = Path("testdata/quality/interview-formal-v1")
+
 
 def error_types(error):
     """仅记录异常类型链，保留根因且避免输出凭证或原始服务响应。"""
@@ -104,8 +108,25 @@ def collect_context(capture, request):
 
 
 def score_saved(report):
-    """原样重评已采集的回复，独立落盘，不重跑面试或覆盖采集结果。"""
+    """原样重评已采集的回复，独立落盘，不重跑面试或覆盖采集结果。
+
+    重评与采集走**同一道冻结门禁**：判分口径或评测代码任何一项变了，重评出的数字就不能
+    与已冻的报告并列比较，所以这里先核清单再动手。
+
+    只核**数据集文件 + 评测代码 + 判分器**，不核 `services`——重评不发任何被测系统请求、
+    也不重新检索，被测服务的配置不在这一轮的因果链上；它属于采集轮，已记在该轮 summary。
+
+    少了这道校验，重评就是一条绕过门禁的路：换个 Judge 端点重评同一份采集结果，产出的
+    分数照样能写进报告，而没有任何一处会拦。
+    """
     QaSettings.from_environment()
+    dataset = INTERVIEW_DATASET
+    manifest = read_freeze_manifest(dataset)
+    if manifest is None:
+        raise ValueError(f"面试重评缺少冻结清单：{dataset / FREEZE_MANIFEST_NAME}")
+    # 键相对 QA 仓库根，用 __file__ 推而不是 cwd：从别的目录启动时不该换一套基准。
+    verify_frozen_files(dataset, Path(__file__).resolve().parents[1], manifest)
+    verify_frozen_judge(manifest, "interview_judge", runtime_judge_config())
     source = Path(report) / "case-results.jsonl"
     rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
     for row in rows:
@@ -116,7 +137,8 @@ def score_saved(report):
     destination = Path(report).parent / ("interview-judge-" + uuid4().hex[:8])
     destination.mkdir(exist_ok=False)
     config = {"judge": runtime_judge_config(), "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-              "source_report": str(source.resolve()), "expected_count": len(rows)}
+              "source_report": str(source.resolve()), "expected_count": len(rows),
+              "freeze_manifest_sha256": hashlib.sha256((dataset / FREEZE_MANIFEST_NAME).read_bytes()).hexdigest()}
     for row in rows:
         row["metrics"] = {}
         row["status"] = "failed"
@@ -147,7 +169,7 @@ async def run(case_ids=None, judge=True):
     reason = QualitySettings.load().skip_reason(settings, require_judge=judge)
     if reason:
         raise ValueError(reason)
-    dataset = Path("testdata/quality/interview-formal-v1")
+    dataset = INTERVIEW_DATASET
     cases = [json.loads(line) for line in (dataset / "cases.jsonl").read_text(encoding="utf-8").splitlines()]
     if case_ids:
         selected = set(case_ids)
@@ -184,6 +206,9 @@ async def run(case_ids=None, judge=True):
         verify_frozen_judge(manifest, "interview_judge", runtime_judge_config() if judge else None)
         actual_services = {r["serviceKey"]: r.get("config") or {} for r in await rag.list_system_services()}
         verify_frozen_services(manifest, actual_services)
+        # 记下核过的清单指纹：重评报告也记同一项，两份报告才能证明基于同一版冻结。
+        config["freeze_manifest_sha256"] = hashlib.sha256(
+            (dataset / FREEZE_MANIFEST_NAME).read_bytes()).hexdigest()
         config["services"] = [{"serviceKey": r["serviceKey"], "model": (r.get("config") or {}).get("model")}
                               for r in await rag.list_system_services() if r["serviceKey"] in {"chat", "embedding", "vision"}]
         registry = CreatedDocumentRegistry(expected_prefix=f"qa-rag-{settings.run_id}-")

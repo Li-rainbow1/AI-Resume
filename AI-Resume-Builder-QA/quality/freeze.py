@@ -13,9 +13,11 @@
 1. **键的基准不同**：`files_sha256` 的键相对**数据集目录**，`qa_code_sha256` 的键相对
    **QA 仓库根**。
 2. **清单与历史归档不能冻自己**：否则每次写清单都会让上一次的校验失败。
-3. **字节级**：算的是 `read_bytes()` 的 sha256，换行风格与文件末尾有无换行都算。本仓库
-   `metrics.py` 是 CRLF 与裸 LF 混合、`reporting.py` 纯 CRLF，用编辑器随手保存一次就会
-   让哈希全变。所以清单本身按 **CRLF + 无末尾换行** 写。
+3. **字节级**：算的是 `read_bytes()` 的 sha256，换行风格与文件末尾有无换行都算。冻结覆盖面
+   的行尾由 `AI-Resume-Builder-QA/.gitattributes` 钉成 LF（`text eol=lf`）：本机
+   `core.autocrlf=true`，钉之前「最近一次 `git checkout`」就能让 `qa_code_sha256` 变化，
+   而代码一个字没改。清单**自身**仍按 **CRLF + 无末尾换行** 写——它是脚本产物、不参与
+   自己的校验，固定写法只是让它自己的哈希可复现。
 """
 
 import hashlib
@@ -31,6 +33,10 @@ FREEZE_HISTORY_DIR = "freeze-history"
 _FROZEN_CODE_DIRS = ("quality", "clients", "fixtures")
 # 隔离环境定义本身也影响结果（模型地址、依赖版本），改名会让哈希锚点失效。
 _FROZEN_CODE_FILES = ("compose.interview-quality.yml",)
+
+# 判分配置里这两组字段不参与「口径是否变化」的整体相等比对，理由见 `comparable_judge`。
+_JUDGE_IGNORED_KEYS = ("env_prefix",)
+_JUDGE_VERSION_KEYS = ("deepeval_version",)
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -139,13 +145,35 @@ def verify_judge(manifest: Mapping[str, Any], key: str, actual: Mapping[str, Any
     declared = manifest.get(key)
     if declared is None:
         raise ValueError(f"冻结清单没有记录 {key}，无法核对判分配置")
-    if declared != actual:
+    if comparable_judge(declared) != comparable_judge(actual):
         raise ValueError("正式评测 Judge 配置与冻结版本不一致")
+
+
+def comparable_judge(config: Mapping[str, Any]) -> dict[str, Any]:
+    """把判分配置折成「真正决定判分口径的那部分」，供整体相等比对。
+
+    比对口径是「默认收紧」：除下面两处外，**任何**字段（含以后新增的）都要完全相等。
+
+    - `env_prefix` 不进比对。它只说明本地从哪组环境变量读到配置
+      （`QUALITY_JUDGE_*` 还是 `DEEPEVAL_JUDGE_*`），是**本地命名**；真正决定口径的
+      端点、模型、请求配方本来就逐个比对，前缀换名而取值不变不算口径变化。
+    - `deepeval_version` 只比 `major.minor`。补丁版是修 bug，不该把已经冻好的报告判成
+      「口径变了」；次版本可能改判分提示词，所以不放开。
+    """
+    comparable: dict[str, Any] = {}
+    for name, value in config.items():
+        if name in _JUDGE_IGNORED_KEYS:
+            continue
+        if name in _JUDGE_VERSION_KEYS and isinstance(value, str):
+            value = ".".join(value.split(".")[:2])
+        comparable[name] = value
+    return comparable
 
 
 __all__ = [
     "FREEZE_HISTORY_DIR",
     "FREEZE_MANIFEST_NAME",
+    "comparable_judge",
     "file_hashes",
     "iter_code_files",
     "iter_dataset_files",

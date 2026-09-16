@@ -11,8 +11,10 @@
 - **正文与附件必须同批、且附件路径要等于正文里的 Markdown 相对路径**。后端靠上传
   manifest 里的 `relativePath` 把附件挂到正文；路径写错不会有任何报错，只会让图片
   静默挂不上、图片题永久无解。
-- **正文必须逐字节复制**。数据集声明的 `sha256` 是证据行号可信的前提，任何「顺手
-  修一下 Markdown」都会让行号与哈希失配。
+- **正文必须与数据集声明的 `sha256` 逐字节一致**。哈希是证据行号可信的前提。唯一一次
+  有意的改写（Obsidian `![[...]]` → 常规 Markdown 链接）发生在**冻结生成时**并已记入
+  `corpus_manifest.json` 的 `transformations`；运行期再做任何「顺手修一下 Markdown」
+  都会让落盘内容与清单失配。
 - **每一个附件都要有归属**：要么被正文引用，要么被数据集点名为已知的未引用项。
   差额对不上说明语料或正文被改过，而这件事不会体现在任何一项指标上。
 """
@@ -113,12 +115,40 @@ def test_unregistered_schema_is_rejected_before_upload(tmp_path: Path) -> None:
 
 @requires_local_corpus
 def test_unreferenced_attachments_are_declared_not_tolerated() -> None:
-    """未引用附件是数据集点名的已知例外，不是「随便几张都行」。"""
-    assert expected_unreferenced_for(_notes_case_set()) == ("附件/Pasted image 20260818090016.png",)
+    """未引用附件只能「点名声明」，不能静默容忍。
+
+    `interview-notes-v1` 声明的是**空集**：冻结生成时已把 `6-计算机网络.md` 第 74 行的
+    Obsidian 链接归一化成常规 Markdown 写法，64 张附件全部有正文归属，多一张少一张都算
+    语料漂移。声明位保留，供将来真出现「挂不上的附件」时点名。
+    """
+    assert expected_unreferenced_for(_notes_case_set()) == ()
     legacy = CaseSet(
         schema_version=LEGACY_SCHEMA_VERSION, dataset_dir=DATASET, cases_path=DATASET, cases=()
     )
     assert expected_unreferenced_for(legacy) == ()
+
+
+def test_declared_unreferenced_exception_must_exist_in_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """点名了就必须真在素材里：点名项消失说明「已知例外」已失效，要当场报错。"""
+    monkeypatch.setattr("quality.corpus._NOTES_UNREFERENCED_ATTACHMENTS", ("附件/orphan.png",))
+
+    def case_set(*names: str) -> CaseSet:
+        return CaseSet(
+            schema_version=NOTES_SCHEMA,
+            dataset_dir=tmp_path,
+            cases_path=tmp_path / "cases.jsonl",
+            cases=(),
+            assets=tuple(
+                CorpusAsset(relative_path=f"corpus/附件/{name}", sha256="0" * 64, kind="image")
+                for name in names
+            ),
+        )
+
+    assert expected_unreferenced_for(case_set("orphan.png")) == ("附件/orphan.png",)
+    with pytest.raises(ValueError, match="未引用附件已不在数据集素材里"):
+        expected_unreferenced_for(case_set("other.png"))
 
 
 def test_declared_hash_is_enforced(tmp_path: Path) -> None:

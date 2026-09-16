@@ -21,6 +21,9 @@ r"""生成数据集的冻结清单（`freeze-manifest.json`）。
     # 换数据集 / 指定拆分
     .\.venv\Scripts\python.exe scripts\freeze_quality_dataset.py --dataset testdata\quality\interview-notes-v1 --split formal
 
+    # 只冻确定性轮（明确放弃判分轮）
+    .\.venv\Scripts\python.exe scripts\freeze_quality_dataset.py --deterministic-only
+
 注意事项：
 
 - 清单按**约定**写：CRLF + 无末尾换行。门禁是字节级读取，用编辑器改这份文件会让
@@ -29,6 +32,11 @@ r"""生成数据集的冻结清单（`freeze-manifest.json`）。
   哈希记进新清单的 `previous_manifest_sha256`；改动数据集/代码后必须重新冻结。
 - `services` 只能来自被测系统本身。抓不到就**不要**用空对象糊过去——空对象会让这层
   校验静默失效。
+- 判分环境变量没配全时**默认直接失败**，不再默默写 `judge: null`：那种清单在判分轮会被
+  门禁拒绝（找不到 `judge` 就报错），却仍能跑通确定性轮，最容易让人误以为清单可用。
+  确实只想冻确定性轮时加 `--deterministic-only` 显式声明。
+- ⚠️ 冻结覆盖面的行尾由 `AI-Resume-Builder-QA/.gitattributes` 钉成 LF。改动这批文件后
+  先确认工作区已是 LF（`git status` 干净）再冻，否则冻下来的是「本机当前检出状态」的哈希。
 """
 
 from __future__ import annotations
@@ -89,6 +97,29 @@ def load_services_from_file(path: Path) -> list[dict]:
     return [item for item in payload if isinstance(item, dict)]
 
 
+def resolve_judge(*, deterministic_only: bool) -> dict | None:
+    """解析判分配置；缺配置时按调用方的**显式**选择处理。
+
+    缺 Judge 时默默写 `judge: null` 是个陷阱：`verify_judge` 在判分轮找不到 `judge` 会
+    直接拒绝，所以这份清单跑不了 DeepEval 基线，却能跑通确定性轮——看起来「冻结成功了」，
+    等到要出分数才发现白冻一次。因此默认失败，只有显式 `--deterministic-only` 才允许
+    写成 `None`，并且把后果打在警告里。
+    """
+    try:
+        return judge_config_summary()
+    except ValueError as exc:
+        if deterministic_only:
+            print("警告：按 --deterministic-only 冻结，不记录 judge；"
+                  f"这份清单**不能**用于判分轮，DeepEval 与面试评测都会被门禁拒绝（{exc}）。",
+                  file=sys.stderr)
+            return None
+        raise SystemExit(
+            f"判分环境变量未配全，无法冻结判分口径：{exc}\n"
+            "先配好 DEEPEVAL_JUDGE_MODEL / DEEPEVAL_JUDGE_BASE_URL / DEEPEVAL_JUDGE_API_KEY，"
+            "或加 --deterministic-only 明确只冻确定性轮。"
+        ) from exc
+
+
 def build_manifest(
     dataset_dir: Path,
     qa_root: Path,
@@ -97,6 +128,7 @@ def build_manifest(
     services: list[dict],
     previous: dict | None,
     previous_sha256: str | None,
+    deterministic_only: bool = False,
 ) -> dict:
     case_set = load_case_set(dataset_dir, split)
     declared_services: dict[str, dict] = {}
@@ -106,12 +138,7 @@ def build_manifest(
             raise SystemExit(f"被测系统没有返回 {key} 服务配置，无法冻结")
         declared_services[key] = item.get("config") or {}
 
-    try:
-        judge = judge_config_summary()
-    except ValueError as exc:
-        judge = None
-        print(f"警告：判分环境变量未配全（{exc}）；清单将不记录 judge，"
-              "本轮冻结版本无法跑 DeepEval 基线。", file=sys.stderr)
+    judge = resolve_judge(deterministic_only=deterministic_only)
 
     files_sha256 = file_hashes(dataset_dir, iter_dataset_files(dataset_dir))
     qa_code_sha256 = file_hashes(qa_root, iter_code_files(qa_root))
@@ -156,6 +183,11 @@ def main() -> None:
     parser.add_argument("--split", default=None, help="拆分名（默认 formal）")
     parser.add_argument("--services-json", type=Path, default=None, help="离线的系统服务响应")
     parser.add_argument("--dry-run", action="store_true", help="只预览，不落盘")
+    parser.add_argument(
+        "--deterministic-only",
+        action="store_true",
+        help="不要求判分口径：判分环境变量缺失时不失败，清单里记 judge=null（该清单只能跑确定性轮）",
+    )
     args = parser.parse_args()
 
     dataset_dir = args.dataset.resolve()
@@ -182,6 +214,7 @@ def main() -> None:
         services=services,
         previous=previous,
         previous_sha256=previous_sha256,
+        deterministic_only=args.deterministic_only,
     )
 
     # 自校验：用与门禁完全相同的实现核一遍刚生成的清单，防止生成不该冻的文件。
@@ -189,7 +222,7 @@ def main() -> None:
     verify_services(manifest, manifest["services"])
     print(f"数据集文件 {len(manifest['files_sha256'])} 个、评测代码 {len(manifest['qa_code_sha256'])} 个")
     print(f"随机抽取核对通过；revision={manifest['revision'][:16]}…")
-    print(f"judge={'已记录' if manifest['judge'] else '未记录（判分环境变量缺失）'}")
+    print(f"judge={'已记录' if manifest['judge'] else '未记录（--deterministic-only，该清单不能用于判分轮）'}")
     print(f"上一版：{previous_sha256 or '（无）'}")
 
     if args.dry_run:

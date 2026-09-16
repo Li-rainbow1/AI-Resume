@@ -28,8 +28,10 @@ _FACTORIES: dict[str, CorpusFactory] = {}
 
 _NOTES_SCHEMA_VERSION = "interview-notes-v1"
 
-# 未引用附件的**已知例外**（见 `_expected_unreferenced`）。
-_NOTES_UNREFERENCED_ATTACHMENTS = ("附件/Pasted image 20260818090016.png",)
+# 未引用附件的**已知例外**（见 `_expected_unreferenced`）。本集是空集：冻结副本在制作时
+# 已把 `6-计算机网络.md` 第 74 行的 Obsidian `![[...]]` 归一化成常规 Markdown 链接，
+# 64 张附件全部有正文归属。声明保留为空，是为了让「附件都必须有归属」这条门禁继续生效。
+_NOTES_UNREFERENCED_ATTACHMENTS: tuple[str, ...] = ()
 
 _IMAGE_CONTENT_TYPES = {
     ".png": "image/png",
@@ -91,9 +93,13 @@ def build_notes_corpus(case_set: "CaseSet", temp_root: Path, run_id: str) -> Qua
     1. **正文与附件同批上传**，且附件的 `relativePath` 必须等于正文里写的 Markdown
        相对路径。后端靠它把附件关联到正文；分批上传或改路径都会让图片静默挂不上，
        图片题直接变成无解。
-    2. **正文逐字节复制**。数据集声明的 `sha256` 是「证据行号可信」的前提，任何改写
-       （包括把 Obsidian 的 `![[...]]` 转成常规链接）都会让行号与冻结哈希失配。
-    3. **未引用附件按数据集点名**（`_expected_unreferenced`），不静默容忍。
+    2. **正文按数据集声明的 `sha256` 逐字节复制**。哈希是「证据行号可信」的前提，落盘
+       后必须与清单一致（`_copy_verified` 逐文件核对）。唯一一次有意的改写（Obsidian
+       `![[...]]` → 常规链接）发生在**冻结生成时**并已记入 `corpus_manifest.json` 的
+       `transformations`（含 before/after 哈希），行数不变，因此证据行号依旧成立。
+       运行期不许再改正文——临时副本里的任何改动都会绕开清单校验。
+    3. **未引用附件按数据集点名**（`_expected_unreferenced`）。本集声明为空集：归一化后
+       64 张附件全部有正文归属，多一张少一张都算语料漂移。
     """
     documents = [asset for asset in case_set.assets if asset.kind == "document"]
     attachments = [asset for asset in case_set.assets if asset.kind != "document"]
@@ -176,13 +182,14 @@ def _content_type_for(path: Path) -> str:
 def _expected_unreferenced(case_set: "CaseSet") -> tuple[str, ...]:
     """数据集里已上传、但正文没有任何 Markdown 引用指向的附件。
 
-    目前只有一张：`6-计算机网络.md` 第 74 行用的是 Obsidian 的 `![[附件/...]]` 写法，
-    后端按 CommonMark 解析（只认 `![](path)`、引用式与快捷式，快捷式还要靠引用定义
-    才能解析出目标），它不会产生任何引用路径 ⇒ 那张图不会被关联、也不会进入检索。
+    `interview-notes-v1` 声明的是**空集**。原先把 `6-计算机网络.md` 第 74 行的 Obsidian
+    `![[附件/...]]` 列为已知例外（后端只认 `![](path)`、引用式与快捷式，不认 `![[...]]`），
+    但那份写法会让该图既挂不上正文、又在知识库里留成无归属附件；核对过全部 8 个图片证据
+    单元、确认无题依赖它之后，改为**在冻结生成时**把它归一化成 `![](附件/...)`，并写入
+    `corpus_manifest.json` 的 `transformations` 留痕。于是 64 张附件全部有正文归属。
 
-    **不需要转换**：数据集里没有任何答案单元引用它（8 张图片证据全部指向别的附件），
-    转换它只会让正文偏离冻结哈希，去换一张不参与评分的图。这里把它列为显式已知例外；
-    一旦它不再是数据集素材，说明例外已经失效，必须回来重算。
+    这里保留声明位与校验：一旦某个数据集确实存在挂不上的附件，必须点名登记；点名项若从
+    素材里消失则报错——「声明的例外已经失效」同样要有人来重算。
     """
     declared = [PurePosixPath(asset.relative_path).as_posix() for asset in case_set.assets]
     for relative in _NOTES_UNREFERENCED_ATTACHMENTS:
