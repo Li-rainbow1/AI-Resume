@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 脚本已实现：schema 分发加载器、**schema 分发的语料编排**、四项确定性指标、真实 RAG 执行器、DeepEval 四项指标、Bad Case 分类、JSONL/CSV/JSON 报告（含题型/主题/模态分组）和 Allure 摘要。
+- 脚本已实现：schema 分发加载器、**schema 分发的语料编排**、三项确定性指标、真实 RAG 执行器、DeepEval 四项指标、Bad Case 分类、JSONL/CSV/JSON 报告（含题型/主题/模态分组）和 Allure 摘要。
 - 单元验证已完成：数据集结构（两代 schema）、语料编排契约、确定性指标、判分器（正则 / 语义）、判分通道配方、DeepEval 适配层（假 Judge 驱动，不联网）、冻结清单（形状 / 门禁 / 生成器往返）都有 pytest 覆盖，全套离线可跑，不调用任何模型。
 - 判分通道已统一：配置与请求配方只有 `quality/judge.py` 一份，三条链路（确定性层语义判分器、DeepEval 四项指标、面试链路）共用，见[判分链路已统一](#判分链路已统一一套-judge一份配方)。
 - 冻结清单已统一：生成方（`scripts/freeze_quality_dataset.py`）与校验方（两条 runner）共用 `quality/freeze.py` 一套实现，见[冻结清单](#冻结清单正式评测的门禁)。
@@ -52,14 +52,14 @@ Mock AI 仅服务接口契约、异常和性能测试，不生成 AI/RAG 质量�
 | 加载分发 | `quality/loaders.py` | `load_case_set()` 读首题 `schema_version` 选加载器；新增数据集 = 新增加载函数 + 一行 `@register_loader` |
 | 来源适配 | `quality/sources.py` | 把 `originalFilename` / `ingestSource` / `imageSourceLocator` / `relativePath` 收敛成 `SourceView`，判「是不是图片来源」只在这一处 |
 | 判分器 | `quality/matchers.py` | `EvidenceMatcher` 协议；`PatternMatcher`（正则、离线）与 `SemanticMatcher`（语义、LLM） |
-| 指标 | `quality/metrics.py` | `evaluate_case(case, answer, sources, matcher)`，四项指标，与 schema 无关 |
+| 指标 | `quality/metrics.py` | `evaluate_case(case, answer, sources, matcher)`，三项指标，与 schema 无关 |
 
 已注册的 schema：
 
 | `schema_version` | 出处 | 多文档 | 判分方式 | 答案单元来源 | DeepEval 指标 |
 | --- | --- | --- | --- | --- | --- |
 | `evidence-v3`（无该字段时回落） | `testdata/quality/golden_dataset.jsonl`（本机已无） | 否 | `match_patterns` 正则 | 每个正则组 = 一个必须命中的子项 | 检索侧两项 |
-| `interview-notes-v1` | `testdata/quality/interview-notes-v1/` | 是 | 语义（`claim` + `acceptance`） | `acceptable_evidence_ids` 的或关系 | 四项齐全 |
+| `interview-notes-v1` | `testdata/quality/interview-notes-v1/` | 是 | 语义（`claim` + `acceptance`） | `acceptable_evidence_ids` 的或关系 | 检索侧两项 |
 
 三条硬约束：
 
@@ -80,10 +80,12 @@ Mock AI 仅服务接口契约、异常和性能测试，不生成 AI/RAG 质量�
 `interview-notes-v1` 的编排有三条硬约束，都由 `tests/quality/test_corpus_orchestration.py` 钉住：
 
 1. **正文与附件必须同一批上传，且附件的 `relativePath` 等于正文里的 Markdown 相对路径**（`附件/<原名>`，不是数据集相对路径 `corpus/附件/<原名>`）。后端靠上传 manifest 的 `relativePath` 把附件挂到正文；路径写错不报错，只会让图片静默挂不上、图片题永久无解。
-2. **正文与数据集声明的 `sha256` 逐字节一致**（落盘时仅文件名加 run 前缀，并逐文件核对）。哈希是证据行号可信的前提。唯一一次有意的改写（`6-计算机网络.md` 第 74 行的 Obsidian `![[...]]` → 常规 Markdown 链接）发生在**冻结生成时**，已记入 `corpus_manifest.json` 的 `transformations`（含 before/after 哈希）；行数不变，所以证据行号仍成立。运行期不许再改正文。
+2. **正文与数据集声明的 `sha256` 逐字节一致**（落盘时仅文件名加 run 前缀，并逐文件核对）。哈希是证据行号可信的前提。唯一一次有意的改写（`6-计算机网络.md` 第 74 行的 Obsidian `![[...]]` → 常规 Markdown 链接，且文件名里的空格按 URL 编码写成 `%20`）发生在**冻结生成时**，已记入 `corpus_manifest.json` 的 `transformations`（含 before/after 哈希）；行数不变，所以证据行号仍成立。运行期不许再改正文。
 3. **每个附件都要有归属**：要么被正文引用，要么被 `expected_unreferenced_attachments` 点名为已知的未引用项。逐篇轮询完的 `referenced_total` 之和与附件总数之差必须**恰好等于**声明的例外数，不等就中止本轮。
 
 `interview-notes-v1` 声明的例外是**空集**：原先 `附件/Pasted image 20260818090016.png` 只被 Obsidian 写法 `![[...]]` 引用，而后端 `markdown_attachment_service` 只认 `![](path)` / `![][label]` / `![label]` 三种写法，解析不到。核对过全部 8 个图片证据单元、确认没有任何一题依赖它之后，改为在冻结生成时把这一处链接归一化（而不是留一张挂不上正文的无归属附件），于是 64 张附件全部有正文归属。声明位保留：将来真出现挂不上的附件必须点名，点名项若从素材里消失则报错。
+
+⚠️ **这条链接踩过两次坑，写法别再改回去。** 图片文件名本身含空格（`Pasted image ….png`），而后端 `_IMAGE_PATTERN` 用 `[^\s)\r\n]+` 捕获路径——`](` 之后**遇空格即断**，所以归一化成 `![](附件/Pasted image 20260818090016.png)`（不编码）会被当成坏语法静默丢弃：正文里看着有图，后端一条引用都抽不到。初版就是这么写的，检索评测在「未引用附件数 1 ≠ 声明 0」门禁处中止（`/api/ai/rag/query` 调用 0 次）。必须让路径里**没有裸空格**：写成 `%20`（后端 `normalize_markdown_attachment_path` 会 `unquote` 解回，与上传 `relativePath` 逐字节相等），或用尖括号 `![](<附件/Pasted image ….png>)`。改完用业务仓库的 `extract_markdown_image_paths` 离线复核一遍：5 篇正文合计应 matched=64 / missing=0 / 未归属=0。
 
 > **语料只在本地保留，不入库。** `testdata/quality/` 由 `.gitignore` 排除——资料是第三方笔记正文与插图，按数据集自己的说明（`资料问题与接入说明.md`「入库前处理」）只在本地制作，不提交、不推送、不发布。因此依赖真实语料的 3 条契约用例带 skip 守卫：语料不在时**跳过**，而不是把「这台机器没有本地语料」误报成实现坏了。其余用例现场构造数据集与语料，任何机器都能跑。
 
@@ -113,32 +115,29 @@ Mock AI 仅服务接口契约、异常和性能测试，不生成 AI/RAG 质量�
 
 想换 embedding 相似度判分：新增一个 `EvidenceMatcher` 子类（实现 `match_many`）并在 `matcher_for_cases` 里选一次即可，指标与报告都不用改。**不建议**用它替代当前实现：数据集明确要求保留否定关系，向量相似度对「把否定说成肯定」不敏感。
 
-## 确定性指标（四项，全部在检索侧）
+## 确定性指标（三项，全部在检索侧）
 
 | 指标 | 输入 | 公式与方向 | 单条失败原因 | 汇总 |
 | --- | --- | --- | --- | --- |
 | Recall@K | 答案单元、TopK sources | 被覆盖的答案单元数 / 单元总数，越高越好；一个单元可由多条片段合起来支持；无答案题不适用 | 单元未在 TopK 内被完整覆盖 | 仅对适用题汇总，并记录评测条数 |
-| Precision@K | 答案单元、TopK sources | 真正支持了至少一个所问事实的**非重复**片段数 / `top_k`，越高越好；无答案题不适用 | TopK 内没有任何一条支持所问事实 | 仅对适用题汇总，并记录评测条数 |
 | Precision@Returned | 同上 | 相关非重复片段数 / **实际返回**片段数；无返回记 `null` | 不参与 Bad Case 分类（见下） | 逐条算术平均，记录评测条数 |
 | MRR | 答案单元、TopK sources | 首个相关来源排名倒数（rank 1 → 1.0、rank 3 → 0.33）；无答案题不适用 | 不参与 Bad Case 分类（见下） | 逐条分数的算术平均，即 MRR |
 
-HTTP 200 只表示请求成功。**四项确定性指标只消费 `sources` 与数据集标注，不读取模型回答**——回答质量完全由 DeepEval 的四项指标承担。不适用的指标写为 `null`，汇总不会把它们按 0 计入，并在 `summary.json` 的 `aggregate_evaluated_count` 记录实际评测条数。
+HTTP 200 只表示请求成功。**三项确定性指标只消费 `sources` 与数据集标注，不读取模型回答**。注意本集对应的接口**不生成回答**（返回的 `answer` 是检索片段拼成的上下文摘要），所以这一层不存在「回答质量」这回事：检索侧确定性三项 + DeepEval 的检索侧两项就是全部口径，生成侧两项归面试链路。不适用的指标写为 `null`，汇总不会把它们按 0 计入，并在 `summary.json` 的 `aggregate_evaluated_count` 记录实际评测条数。
 
-### Precision@K 的三处口径说明
+### 相关性判据的口径说明
 
-- **分母固定为 `top_k`**，不是实际返回条数。检索返回不足 K 条时如实扣分，不掩盖召回不足——语料 Chunk 总数小于 `top_k` 的题会因此天然拿不到满分。少返回造成的稀释由配对的 `Precision@Returned` 单独呈现，两个分母不能混为一谈。
 - **判据是「片段是否支持了所问事实」，不是「片段属于哪篇文档」。**（evidence-v4 修正）旧文档写的是「只比文档归属、不看位置」，但旧实现一直是位置感知的——单元必须同时命中文件归属与位置/图片定位才算相关。现在把口径统一到实现与新数据集说明：支持了单元才算相关。口径变化只影响图片/位置错的片段（它们不再被计成「相关」），并且旧数据集文件已不在本机，不存在需要重算的历史报告。
-- **门禁是 `> 0`，不是 `== 1`**：等价于「TopK 内至少有一条真正支持所问事实的来源」，也就是 Hit Rate@k 的 0/1 判定。不要求满分，是因为上一条分母规则会让「库内 Chunk 不够」的题天然达不到 1.00，那不属于检索质量问题。
-- 单文档语料下所有 Chunk 共享同一 `originalFilename`，该指标退化为恒值（召回非空时恒为 `返回条数 / top_k`）。旧语料含 3 篇干扰文档、共 21 个正文 Chunk，而 `top_k=4`，干扰来源进入 TopK 会直接拉低该指标，区分度由此成立。`interview-notes-v1` 不设人工干扰文档：它自带 5 篇同域文档，跨文档竞争本身就是区分度来源。
+- 同一判据供 `Precision@Returned` 与 `MRR` 共用：前者统计相关片段占**实际返回**条数的比例，后者取首个相关片段的排名倒数。
 
 ### MRR 的两处口径说明
 
 - **逐条值是 RR，不是 MRR。** `case-results.jsonl` / `case-summary.csv` 里每条记录存的是该题的排名倒数（1/rank），因为 MRR 的定义是「对所有查询求平均」，只有跨题才有意义。`summary.json` 的 `aggregate.mrr` 才是 MRR（对 17 道有答案题的 RR 取算术平均，无答案题记 `None` 不计入）。`aggregate_evaluated_count.mrr` 会显示实际参与计算的条数。
 - **MRR 不产生 Bad Case 分类。** `classify_bad_case` 返回的 reason 会直接进入 `failure_reasons` 并让该题判失败，而「正确来源排在第 2、3 位」不等于检索失败，因此 MRR 只在报告里呈现，不新增分类。它的用途是**趋势指标**：优化排序（例如加 Rerank）后 MRR 会抬升，而同期的 Recall@K 可能完全不动——这正是 Recall@K 单独无法刻画的部分。
 - 相关性判据与 Recall@K 完全同源（覆盖了任一答案单元的片段即相关，单元自身的文档归属与图片定位都由 `selector_matches` 判定），因此 MRR **不需要任何新增标注**。
-- 门禁规则与 Precision@K 一致（`> 0`）。注意它被 `recall_at_k == 1` 隐含：能完整命中位置就一定存在命中来源。所以加 MRR 不会收紧原有失败门槛。
+- 门禁只取 `MRR > 0`，且它被 `recall_at_k == 1` 隐含：能完整命中单元就一定存在命中来源。所以加 MRR 不会收紧原有失败门槛。
 
-### 已删除的五项指标
+### 已删除的指标
 
 早期版本的七项指标里已有四项被整体移除（函数、门禁条件、Bad Case 分类一并清理）：
 
@@ -151,9 +150,17 @@ HTTP 200 只表示请求成功。**四项确定性指标只消费 `sources` 与�
 
 - **图片知识命中率（`image_knowledge_hit`）**：要求 TopK 内存在 `ingestSource == 'image_vision'` 且命中 `expected_source_location` 的来源。数据集里图表题的位置标注只有 `imageLocator` 一种，而只有图片解析分片带 `imageSourceLocator`/`relativePath`、正文分片没有这个字段（`document_chunking_service.py` 的正文 metadata 不含图片定位字段），于是 `Recall@K` 在 `image_ocr`/`table_or_flow` 题上判定的就是同一件事；在 `mixed` 题上它反而更松（任一图片位置命中即得 1.0，而 `Recall@K` 是位置命中数占比），因此 `image_knowledge_hit == 0` 必然伴随 `recall_at_k < 1`，删掉不会漏判任何失败。代价是报告少一列便于定位图片链路故障的指标、Bad Case 少一个「图片Chunk未命中」标签——图片链路故障改由「来源位置错误」体现。
 
+第三批删除的 `precision_at_k` 与上面五条都不同——它不是噪声、也不是被别的指标覆盖，而是**同一个问题有两套分母、其中一套没人会用**：
+
+- **它的分母固定为 `top_k`，回答的是「TopK 名额占了多少」，不是「返回得准不准」。** 上游检索会按相似度阈值裁掉弱片段、且**不补足条数**，因此实际返回经常少于 `top_k`：`notes-v1-20260917b` 这轮 45 道有答案题里只有 15 道返回满 4 条，汇总值 `0.35` 主要是被「少返回」拉下来的。同批 `precision_at_returned = 0.65` 才是「返回内容准不准」的读数；两个分母并存，只会让 `0.35` 被误读成检索质量问题。
+- **它在门禁里本来就冗余**：判定式里的 `precision_at_k > 0` 与 `mrr > 0` 等价（都只是「至少有一条相关片段」），删掉不改变任何一题的结论（本轮仍是 29 过 / 16 挂）。
+- **单文档语料下它还会退化成恒值**：召回非空时恒等于 `返回条数 / top_k`，区分度完全依赖语料里存在干扰文档，与本集「不设人工干扰文档」的设计相抵。
+
+删除后确定性层收紧为 `Recall@K` / `Precision@Returned` / `MRR` 三项，报告里对应的列自动消失（列由指标字典动态生成，不需要改报告代码）。
+
 **因此当前的确定性层只在检索侧**，两个已知后果需要明说：
 
-1. **无答案题没有确定性门禁。** 三项指标对 `question_type=no_answer` 全部返回 `null`，`deterministic_passed` 恒为真——合理拒答和编造答案在这一层不可区分，只能靠 DeepEval 的 `Faithfulness` 拦截，所以无答案题只在 `QA_RUN_DEEPEVAL=1` 的那一轮才有约束。这个缺口是刻意接受的，`test_no_answer_cases_have_no_deterministic_gate` 把它钉住，补门禁时需同步更新本文件。
+1. **无答案题没有确定性门禁。** 三项指标对 `question_type=no_answer` 全部返回 `null`，`deterministic_passed` 恒为真——合理拒答与「检索拿回一堆不相关片段」在这一层不可区分。本集链路上没有生成环节，所以不存在「编造答案」可拦，`Faithfulness` 也已不在本集声明里（那是面试链路的口径）；无答案题实际只剩检索侧一条间接约束。这个缺口是刻意接受的，`test_no_answer_cases_have_no_deterministic_gate` 把它钉住，补门禁时需同步更新本文件。
 2. **确定性基线（`test_real_rag_deterministic_baseline`）是检索回归门禁，不是回答正确性证据。** 它只保证「来源找对没有」，适合作为 Chunking、Embedding、Rerank 等检索改动的回归门禁；报告里不能把它写成回答质量结论。
 
 `golden_dataset.jsonl` 的 `expected_facts`、`forbidden_facts` 标注保留：`expected_facts` 仅作人工复核依据（「OCR内容缺失」分类已随词面匹配一并移除），`forbidden_facts` 落到 `EvalCase.forbidden_claims`，两者当前都不参与打分。
@@ -176,7 +183,7 @@ DeepEval 检索侧另有 `Contextual Precision`（相关 Chunk 是否排在前�
 - `expected_output`：参考答案；
 - `retrieval_context`：sources 中的 `content`。
 
-**指标集由题目声明。** `EvalCase.judge_metrics` 决定本题适用哪几项：旧集声明检索侧两项，`interview-notes-v1` 声明四项齐全。这里修掉了一处静默缺口——`deepeval_adapter.py` 的 `METRIC_NAMES` 一直列着四项，但 `metric_factories` 只实现了 `Contextual Recall` 与 `Contextual Relevancy`，`Faithfulness` 与 `Answer Relevancy` 从未被测量且没有任何报错。现在四项全部实现，未实现的指标名会直接抛错；`Faithfulness` 沿用面试链路验证过的 `penalize_ambiguous_claims=True`。缺项也不再算通过：`judge_passed` 要求实际测到的指标集合等于题目声明的集合。
+**指标集由题目声明。** `EvalCase.judge_metrics` 决定本题适用哪几项：目前两个数据集都只声明**检索侧两项**——旧集本来就是检索集；`interview-notes-v1` 对应的 `/api/ai/rag/query` 不生成回答（`answer` 是检索片段拼装），生成侧两项在这条链路上测不出信号，它们归面试链路。这里修掉了一处静默缺口——`deepeval_adapter.py` 的 `METRIC_NAMES` 一直列着四项，但 `metric_factories` 只实现了 `Contextual Recall` 与 `Contextual Relevancy`，`Faithfulness` 与 `Answer Relevancy` 从未被测量且没有任何报错。现在四项全部实现，未实现的指标名会直接抛错；`Faithfulness` 沿用面试链路验证过的 `penalize_ambiguous_claims=True`。缺项也不再算通过：`judge_passed` 要求实际测到的指标集合等于题目声明的集合。
 
 Judge 配置只从当前进程读取，唯一入口是 `quality/judge.py::judge_config_from_environment`：前缀 `QUALITY_JUDGE_*` → `DEEPEVAL_JUDGE_*`，取第一组配齐的（`MODEL` / `BASE_URL` / `API_KEY`）。阈值与重复次数是 `<前缀>_THRESHOLD` / `<前缀>_REPEAT_COUNT`；重复评分极差超过 0.2 会归类为“Judge评分波动”。这些变量不写入 `.env.test.example`、日志或报告（报告只留脱敏摘要 + `env_prefix`）。
 
@@ -193,7 +200,8 @@ Judge 必须与待测 Chat 模型**异构**：同源同模型等于自评，分�
 | 位置 | 职责 |
 | --- | --- |
 | `judge.JudgeConfig` / `judge_config_from_environment` | 唯一的环境读取；记录生效前缀（`env_prefix`），`summary()` 去掉凭证后可直接进报告 |
-| `judge.judge_completion` | **唯一的请求出口**。固定 `temperature=0`、`response_format=json_object`、`extra_body={"enable_thinking": False}`、SDK `max_retries=0`、`timeout` 取自配置 |
+| `judge.judge_completion` | **唯一的请求出口**。固定 `temperature=0`、`response_format=json_object`、`extra_body=JUDGE_EXTRA_BODY`、SDK `max_retries=0`、`timeout` 取自配置；**传输层重试也只有这一份**（断连/超时/限流/5xx，见下第 4 条） |
+| `judge.JUDGE_EXTRA_BODY` | 思考参数，**只有一套**：智谱原生端点的 `{"thinking": {"type": "enabled"}}`（恒开思考）。取值原样进 `summary()["thinking"]` |
 | `judge.OpenAICompatibleJudge` | 确定性层的语义判分通道（把正文解析成 dict） |
 | `deepeval_judge.DeepEvalJudgeLLM` | 把同一配方接到 DeepEval 的模型接口（把正文校验成 pydantic 对象） |
 | `interview_judge.InterviewJudge` | **就是** `DeepEvalJudgeLLM` 的别名，面试链路不再有独立实现 |
@@ -202,12 +210,15 @@ Judge 必须与待测 Chat 模型**异构**：同源同模型等于自评，分�
 
 统一带来的行为变化，需要知道：
 
-1. **端点必须支持 `response_format={"type": "json_object"}` 与 `enable_thinking=False`。** 原先只有 DeepEval 层走「普通对话 + `trimAndLoadJson` 抽子串」的兼容路径；现在废弃该路径，改由服务端保证 JSON。另两条链路本来就一直这么发，端点已实测通过。
+1. **端点必须支持 `response_format={"type": "json_object"}` 与 `extra_body=JUDGE_EXTRA_BODY` 所指定的思考参数。** 原先只有 DeepEval 层走「普通对话 + `trimAndLoadJson` 抽子串」的兼容路径；现在废弃该路径，改由服务端保证 JSON。另两条链路本来就一直这么发，端点已实测通过。判分器固定为智谱原生端点（`open.bigmodel.cn/api/paas/v4`）上的 `glm-5.3-flash`，思考参数写法 `{"thinking": {"type": "enabled"}}`——这套字段名与 dashscope `compatible-mode` 的 `enable_thinking` **不通用**，换端点必须同时改 `JUDGE_EXTRA_BODY`，没有回落分支。
 2. **`QUALITY_JUDGE_*` 现在也会驱动 DeepEval 层**（原先该前缀只影响确定性层）。优先级仍是 `QUALITY_JUDGE_*` → `DEEPEVAL_JUDGE_*`，生效前缀记在报告的 `judge.env_prefix` 里。这正是「不要设 `QUALITY_JUDGE_*`，让三条链路共用同一个 Judge」那条建议的强制化。
 3. **阈值与重复次数跟着生效前缀走**：`<前缀>_THRESHOLD` / `<前缀>_REPEAT_COUNT`，该前缀没配则回落 `DEEPEVAL_JUDGE_*`。
-4. **重试语义**：SDK 不重试；`DeepEvalJudgeLLM` 只在「返回了但结构不合法」时重试到 `max_attempts`（默认 3，`<前缀>_MAX_ATTEMPTS` 可调），网络与鉴权错误直接抛出——与 `SemanticMatcher` 的策略一致。原先 GPTModel 那条路径带 deepeval 重试 + SDK 默认重试，代价是失败面被拖长。
+4. **重试语义（2026-09-17 起分两层，别再按旧的「网络错误直接抛」理解）**：
+   - **传输层**：`judge_completion` 自己对断连/超时/限流/5xx 重试，次数用 `max_attempts`（默认 3），退避固定 2s×次数。重试的是**同一条报文**，模型输入没变，所以分数含义不变；`sdk_max_retries` 仍是 0。策略记在报告 `judge.transport_retry_attempts` / `transport_retry_backoff_seconds` 里。
+   - **结构层**：`DeepEvalJudgeLLM` / `SemanticMatcher` 只在「返回了但结构不合法」时重试到 `max_attempts`；鉴权、400 这类不重试（同一份报文再发还是错）。
+   - **为什么加**：端点偶发断连时，确定性层的证据判分原先没有任何保护，一个 `APIConnectionError` 把已跑 19 分钟的那轮 50 题整体打断（`APIConnectionError` 不是 `ValueError`）。用满重试仍失败时，`runner` 会按与 DeepEval 层相同的口径记一条「Judge 执行失败：<类型>」并继续跑下一题，不再中断整轮。
 5. **「判分器没给分」的失败口径两条链路一致**：`deepeval_adapter` 与 `interview_runner` 都抛 `RuntimeError` 并带出 `metric.error`，不再出现「一处有原因、一处只有裸 `ValueError`」。
-6. **冻结清单的 `judge` / `interview_judge` 块要按新形状重生成。** `runner.py` 与 `interview_runner.py` 拿运行时摘要与清单做**整体相等**比对；统一后摘要新增了 `temperature` / `response_format` / `enable_thinking` / `sdk_max_retries` / `max_attempts` / `request_timeout_seconds` / `env_prefix` 七项，按旧形状写好的清单会被判「Judge 配置与冻结版本不一致」。当前仓库内还没有任何 `freeze-manifest.json`（新数据集尚未冻结），因此这是**待触发**项：第一次冻结时照新形状生成即可。
+6. **冻结清单的 `judge` / `interview_judge` 块要按新形状重生成。** `runner.py` 与 `interview_runner.py` 拿运行时摘要与清单做**整体相等**比对；统一后摘要新增了 `temperature` / `response_format` / `thinking` / `sdk_max_retries` / `max_attempts` / `transport_retry_attempts` / `transport_retry_backoff_seconds` / `request_timeout_seconds` / `env_prefix` 九项，按旧形状写好的清单会被判「Judge 配置与冻结版本不一致」。当前仓库内还没有任何 `freeze-manifest.json`（新数据集尚未冻结），因此这是**待触发**项：第一次冻结时照新形状生成即可。
    - ✅ 原先记的「`env_prefix` 与 `deepeval_version` 也在比对范围内、改前缀名或升补丁版都会误报」已修（2026-09-16）：比对改为 `quality/freeze.py::comparable_judge`——`env_prefix` 不比，`deepeval_version` 只比 `major.minor`，其余字段（含以后新增的）仍然逐个比对。见「冻结清单」节的四条约定。
 
 另有一条**指标口径**上的非对称，来自 deepeval 自身实现，不是本项目引入：Judge 返回空 verdict 列表时，`Contextual Recall` / `Contextual Relevancy` 记 **0 分**，而 `Faithfulness` / `Answer Relevancy` 记 **满分**。即同一份异常输出会同时「误杀缺/杂」与「误放编/偏」。空回答本身已被 `measure()` 的 `actual_output` 校验拦成 `MissingTestCaseParamsError`（不会走到这条路径），但「回答非空、claims 抽不出来」仍会白拿满分。

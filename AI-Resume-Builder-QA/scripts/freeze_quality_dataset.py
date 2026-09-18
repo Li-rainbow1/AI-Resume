@@ -57,6 +57,7 @@ from clients.auth import AuthClient  # noqa: E402
 from clients.rag import RagClient  # noqa: E402
 from fixtures.config import QaSettings  # noqa: E402
 from quality.deepeval_adapter import judge_config_summary  # noqa: E402
+from quality.interview_runner import runtime_judge_config  # noqa: E402
 from quality.freeze import (  # noqa: E402
     FREEZE_HISTORY_DIR,
     FREEZE_MANIFEST_NAME,
@@ -154,6 +155,13 @@ def build_manifest(
         "qa_code_sha256": qa_code_sha256,
         "services": declared_services,
         "judge": judge,
+        # 两条链路核各自的键：检索 runner 核 `judge`，interview_runner 核 `interview_judge`
+        # （`run`/`score_saved` 的 `verify_frozen_judge`）。形状必须与运行时一致——
+        # interview_runner 的 `runtime_judge_config()` 比 `judge_config_summary()` 多
+        # `adapter` / `faithfulness_penalize_ambiguous_claims` / `adapter_sha256` 三项，
+        # `verify_judge` 是整体相等比对，少一项就拒。键不一致（09-16 遗留）与形状差异
+        # 已随 interview-formal-v1 立项一并收口。
+        "interview_judge": None if judge is None else runtime_judge_config(),
     }
     if previous is not None:
         # 清单没有旧的 `revision` 字段时也不强求：只为交代「上一版是什么」。

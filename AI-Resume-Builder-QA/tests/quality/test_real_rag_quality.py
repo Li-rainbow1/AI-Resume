@@ -7,7 +7,6 @@ import pytest
 
 from clients.rag import RagClient
 from fixtures.config import QaSettings
-from fixtures.lifecycle import CreatedDocumentRegistry
 from quality.runner import run_quality_evaluation
 from quality.runtime_guard import real_model_guard_reason
 from quality.settings import QualitySettings
@@ -15,7 +14,6 @@ from quality.settings import QualitySettings
 
 async def _run(
     rag_client: RagClient,
-    created_documents: CreatedDocumentRegistry,
     qa_settings: QaSettings,
     tmp_path: Path,
     include_deepeval: bool,
@@ -29,7 +27,6 @@ async def _run(
         pytest.skip(guard_reason)
     results = await run_quality_evaluation(
         rag_client,
-        created_documents,
         qa_settings.run_id,
         tmp_path / "quality-assets",
         qa_settings.image_poll_timeout_seconds,
@@ -65,11 +62,10 @@ async def _run(
 @pytest.mark.asyncio
 async def test_real_rag_deterministic_baseline(
     rag_client: RagClient,
-    created_documents: CreatedDocumentRegistry,
     qa_settings: QaSettings,
     tmp_path: Path,
 ) -> None:
-    await _run(rag_client, created_documents, qa_settings, tmp_path, include_deepeval=False)
+    await _run(rag_client, qa_settings, tmp_path, include_deepeval=False)
 
 
 @pytest.mark.quality_eval
@@ -77,9 +73,8 @@ async def test_real_rag_deterministic_baseline(
 @pytest.mark.asyncio
 async def test_real_rag_deepeval_baseline(
     rag_client: RagClient,
-    created_documents: CreatedDocumentRegistry,
     qa_settings: QaSettings,
     tmp_path: Path,
 ) -> None:
     pytest.importorskip("deepeval", reason="缺少 DeepEval 可选依赖，请安装 .[eval,test]")
-    await _run(rag_client, created_documents, qa_settings, tmp_path, include_deepeval=True)
+    await _run(rag_client, qa_settings, tmp_path, include_deepeval=True)

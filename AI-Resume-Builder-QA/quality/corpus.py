@@ -29,8 +29,13 @@ _FACTORIES: dict[str, CorpusFactory] = {}
 _NOTES_SCHEMA_VERSION = "interview-notes-v1"
 
 # 未引用附件的**已知例外**（见 `_expected_unreferenced`）。本集是空集：冻结副本在制作时
-# 已把 `6-计算机网络.md` 第 74 行的 Obsidian `![[...]]` 归一化成常规 Markdown 链接，
-# 64 张附件全部有正文归属。声明保留为空，是为了让「附件都必须有归属」这条门禁继续生效。
+# 已把 `6-计算机网络.md` 第 74 行的 Obsidian `![[...]]` 归一化成常规 Markdown 链接
+# （图片名含空格，故空格编码为 `%20`），64 张附件全部有正文归属。声明保留为空，是为了
+# 让「附件都必须有归属」这条门禁继续生效。
+#
+# ⚠️ 归一化后的链接**必须不含裸空格**：后端 `_IMAGE_PATTERN` 用 `[^\s)\r\n]+` 捕获路径，
+# `](` 之后遇空格即断，`![](附件/Pasted image ….png)` 会被静默丢弃（正文有图、后端零引用）。
+# 初版就是漏了这一步，导致检索评测卡在下面的「未引用附件数 ≠ 声明数」门禁。
 _NOTES_UNREFERENCED_ATTACHMENTS: tuple[str, ...] = ()
 
 _IMAGE_CONTENT_TYPES = {
@@ -86,7 +91,7 @@ def build_legacy_corpus(case_set: "CaseSet", temp_root: Path, run_id: str) -> Qu
 
 @register_corpus_factory(_NOTES_SCHEMA_VERSION)
 def build_notes_corpus(case_set: "CaseSet", temp_root: Path, run_id: str) -> QualityCorpus:
-    """面试八股集：5 篇正文 + 各自的附件，同批上传。
+    r"""面试八股集：5 篇正文 + 各自的附件，同批上传。
 
     三条约束都不允许「顺手优化」：
 
@@ -95,7 +100,8 @@ def build_notes_corpus(case_set: "CaseSet", temp_root: Path, run_id: str) -> Qua
        图片题直接变成无解。
     2. **正文按数据集声明的 `sha256` 逐字节复制**。哈希是「证据行号可信」的前提，落盘
        后必须与清单一致（`_copy_verified` 逐文件核对）。唯一一次有意的改写（Obsidian
-       `![[...]]` → 常规链接）发生在**冻结生成时**并已记入 `corpus_manifest.json` 的
+       `![[...]]` → 常规链接，并把文件名里的空格编码成 `%20`——不编码会被后端的
+       `[^\s)\r\n]+` 截断）发生在**冻结生成时**并已记入 `corpus_manifest.json` 的
        `transformations`（含 before/after 哈希），行数不变，因此证据行号依旧成立。
        运行期不许再改正文——临时副本里的任何改动都会绕开清单校验。
     3. **未引用附件按数据集点名**（`_expected_unreferenced`）。本集声明为空集：归一化后
@@ -180,13 +186,15 @@ def _content_type_for(path: Path) -> str:
 
 
 def _expected_unreferenced(case_set: "CaseSet") -> tuple[str, ...]:
-    """数据集里已上传、但正文没有任何 Markdown 引用指向的附件。
+    r"""数据集里已上传、但正文没有任何 Markdown 引用指向的附件。
 
     `interview-notes-v1` 声明的是**空集**。原先把 `6-计算机网络.md` 第 74 行的 Obsidian
     `![[附件/...]]` 列为已知例外（后端只认 `![](path)`、引用式与快捷式，不认 `![[...]]`），
     但那份写法会让该图既挂不上正文、又在知识库里留成无归属附件；核对过全部 8 个图片证据
-    单元、确认无题依赖它之后，改为**在冻结生成时**把它归一化成 `![](附件/...)`，并写入
-    `corpus_manifest.json` 的 `transformations` 留痕。于是 64 张附件全部有正文归属。
+    单元、确认无题依赖它之后，改为**在冻结生成时**把它归一化成 `![](附件/Pasted%20image
+    %2020260818090016.png)`，并写入 `corpus_manifest.json` 的 `transformations` 留痕。
+    注意路径必须是 `%20` 编码或尖括号包裹——图片名本身含空格，裸空格会被后端
+    `[^\s)\r\n]+` 截断、解析不到（2026-09-17 修的正是这个）。于是 64 张附件全部有正文归属。
 
     这里保留声明位与校验：一旦某个数据集确实存在挂不上的附件，必须点名登记；点名项若从
     素材里消失则报错——「声明的例外已经失效」同样要有人来重算。

@@ -94,8 +94,10 @@ class EvalCase:
     expected_facts: tuple[str, ...] = ()
     refusal_rubric: dict[str, Any] = field(default_factory=dict)
     notes: str = ""
-    # 本题适用哪些 DeepEval 指标；空表示用适配层默认集。旧集只用检索侧两项，
-    # 面试八股集要求四项齐全，因此这件事必须由题目声明而不是写死在适配层。
+    # 本题适用哪些 DeepEval 指标；空表示用适配层默认集。**按数据集对应的业务链路声明**：
+    # 检索链路（`/api/ai/rag/query` 不生成回答）的两个集都只声明检索侧两项，回答侧两项
+    # 留给面试链路（它在 `interview_runner.py` 里自己点指标）。因此这件事必须由题目声明，
+    # 而不是写死在适配层。
     judge_metrics: tuple[str, ...] = ()
 
     @property

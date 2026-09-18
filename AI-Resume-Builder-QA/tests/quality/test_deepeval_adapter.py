@@ -246,7 +246,7 @@ def test_judge_config_summary_redacts_credentials(monkeypatch: pytest.MonkeyPatc
     # 通道事实来自共享配方，本层只补指标级开关；报告里必须能看出配置来源。
     assert summary["env_prefix"] == "DEEPEVAL_JUDGE"
     assert summary["response_format"] == "json_object"
-    assert summary["enable_thinking"] is False
+    assert summary["thinking"] == {"thinking": {"type": "enabled"}}
     assert summary["sdk_max_retries"] == 0
     assert summary["request_timeout_seconds"] == 60.0
     assert summary["threshold"] == 0.5

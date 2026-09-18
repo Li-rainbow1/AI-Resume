@@ -43,6 +43,8 @@ class FakeCompletion:
     instances: list[dict[str, Any]] = []
     requests: list[dict[str, Any]] = []
     replies: list[str] = ['{"ok": true}']
+    #: 第 N 次调用要抛的异常（`None` 表示这次正常返回）；用来离线验证传输层重试。
+    errors: list[Exception | None] = []
 
     def __init__(self, **kwargs: Any) -> None:
         FakeCompletion.instances.append(kwargs)
@@ -50,15 +52,20 @@ class FakeCompletion:
         self.completions = self
 
     def create(self, **kwargs: Any) -> Any:
+        position = len(FakeCompletion.requests)
         FakeCompletion.requests.append(kwargs)
+        error = FakeCompletion.errors[position] if position < len(FakeCompletion.errors) else None
+        if error is not None:
+            raise error
         index = min(len(FakeCompletion.requests), len(FakeCompletion.replies)) - 1
         return type("R", (), {"choices": [type("C", (), {"message": type("M", (), {"content": FakeCompletion.replies[index]})()})()]})()
 
     @classmethod
-    def reset(cls, replies: list[str] | None = None) -> None:
+    def reset(cls, replies: list[str] | None = None, errors: list[Exception | None] | None = None) -> None:
         cls.instances = []
         cls.requests = []
         cls.replies = replies or ['{"ok": true}']
+        cls.errors = list(errors or [])
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +85,7 @@ class Verdicts(BaseModel):
 
 
 def test_single_request_recipe_is_used_by_the_channel() -> None:
-    """唯一出口 `judge_completion` 的报文：温度 0、强制 JSON、关思考、不重试。"""
+    """唯一出口 `judge_completion` 的报文：温度 0、强制 JSON、开思考、不重试。"""
     content = judge_completion(CONFIG, "system prompt", "user prompt")
     assert content == '{"ok": true}'
     assert FakeCompletion.instances == [
@@ -89,7 +96,7 @@ def test_single_request_recipe_is_used_by_the_channel() -> None:
             "model": "judge-model",
             "temperature": 0,
             "response_format": {"type": "json_object"},
-            "extra_body": {"enable_thinking": False},
+            "extra_body": {"thinking": {"type": "enabled"}},
             "messages": [
                 {"role": "system", "content": "system prompt"},
                 {"role": "user", "content": "user prompt"},
@@ -103,7 +110,50 @@ def test_json_channel_parses_through_the_same_recipe() -> None:
     assert OpenAICompatibleJudge(CONFIG).answer_json("s", "u") == {"units": []}
     # 走的是同一个出口：报文完全一致。
     assert FakeCompletion.requests[0]["response_format"] == {"type": "json_object"}
-    assert FakeCompletion.requests[0]["extra_body"] == {"enable_thinking": False}
+    assert FakeCompletion.requests[0]["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def _connection_error() -> Exception:
+    """真的 `APIConnectionError`（`APITimeoutError` 是它的子类），构造时不发请求。"""
+    import httpx
+    import openai
+
+    return openai.APIConnectionError(request=httpx.Request("POST", "https://judge.invalid/v1"))
+
+
+def test_transport_error_is_retried_with_the_same_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """一次断连不等于「这题判分失败」：同一条报文重发，模型输入没变，分数含义不变。
+
+    2026-09-17：端点偶发断连时确定性层的证据判分没有任何保护，一个 `APIConnectionError`
+    把已跑 19 分钟的那轮 50 题整体打断。
+    """
+    monkeypatch.setattr("quality.judge.time.sleep", lambda _seconds: None)
+    FakeCompletion.reset(['{"ok": true}'], errors=[_connection_error(), None])
+    assert judge_completion(CONFIG, "system prompt", "user prompt") == '{"ok": true}'
+    assert len(FakeCompletion.requests) == 2
+    # 重试必须是同一条报文，否则就变成换了个输入重新判分。
+    assert FakeCompletion.requests[0] == FakeCompletion.requests[1]
+
+
+def test_transport_error_raises_once_max_attempts_is_used_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """重试用满仍失败就必须抛：不能把失败吞成「没命中证据」，那会把断连算成业务不达标。"""
+    import openai
+
+    monkeypatch.setattr("quality.judge.time.sleep", lambda _seconds: None)
+    FakeCompletion.reset(errors=[_connection_error(), _connection_error()])
+    with pytest.raises(openai.APIConnectionError):
+        judge_completion(CONFIG, "system prompt", "user prompt")
+    assert len(FakeCompletion.requests) == CONFIG.max_attempts == 2
+
+
+def test_non_transport_error_is_not_retried() -> None:
+    """鉴权/请求类错误重试没有意义——同一份报文再发一次还是错，只会拖长失败面。"""
+    import openai
+
+    FakeCompletion.reset(errors=[openai.OpenAIError("bad credential")])
+    with pytest.raises(openai.OpenAIError):
+        judge_completion(CONFIG, "system prompt", "user prompt")
+    assert len(FakeCompletion.requests) == 1
 
 
 def test_json_channel_rejects_non_object_payload() -> None:
@@ -186,12 +236,25 @@ def test_summary_records_the_recipe_actually_used() -> None:
     summary = CONFIG.summary()
     assert summary["temperature"] == 0
     assert summary["response_format"] == "json_object"
-    assert summary["enable_thinking"] is False
+    assert summary["thinking"] == {"thinking": {"type": "enabled"}}
     assert summary["sdk_max_retries"] == 0
     assert summary["request_timeout_seconds"] == 42.0
     assert summary["max_attempts"] == 2
+    # 传输层重试是 `judge_completion` 自己做的，`sdk_max_retries=0` 会让人误以为
+    # 「一次断连就判失败」，所以策略必须一起写进报告。
+    assert summary["transport_retry_attempts"] == 2
+    assert summary["transport_retry_backoff_seconds"] == 2.0
     assert summary["env_prefix"] == "QUALITY_JUDGE"
     assert summary["base_url"] == "https://judge.invalid/v1"
+
+
+def test_summary_thinking_matches_the_request_body() -> None:
+    """`summary()["thinking"]` 必须与实际报文同源——否则报告会记着一组从没发出去的参数。
+
+    这正是上面那条契约的守护：加/换思考参数时，两边一起动，别只改一处。
+    """
+    judge_completion(CONFIG, "system prompt", "user prompt")
+    assert CONFIG.summary()["thinking"] == FakeCompletion.requests[0]["extra_body"]
 
 
 def test_judge_prefixes_declare_missing_variables(monkeypatch: pytest.MonkeyPatch) -> None:

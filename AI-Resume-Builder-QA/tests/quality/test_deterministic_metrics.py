@@ -101,10 +101,10 @@ def test_source_matches_translates_legacy_location_dict() -> None:
 def test_image_unit_needs_both_document_and_locator() -> None:
     case = _image_case()
     assert evaluate_case(case, "", [_image_source("访问码 LIME-482")])["recall_at_k"] == 1.0
-    # 图片定位错 -> 没覆盖；该片段也没支持任何所问事实 -> Precision@K 记 0。
+    # 图片定位错 -> 没覆盖；该片段也没支持任何所问事实 -> 返回精度记 0。
     wrong_locator = evaluate_case(case, "", [_image_source("访问码 LIME-482", locator="other.png")])
     assert wrong_locator["recall_at_k"] == 0.0
-    assert wrong_locator["precision_at_k"] == 0.0
+    assert wrong_locator["precision_at_returned"] == 0.0
     assert wrong_locator["mrr"] == 0.0
     # 图片片段不能顶替正文证据：正文单元的 kind 会把它排除掉。
     assert evaluate_case(_text_case(), "", [_image_source("流程包含受理与审核")])["recall_at_k"] == 0.0
@@ -142,31 +142,29 @@ def test_mrr_reflects_first_relevant_rank() -> None:
 
 
 def test_precision_at_returned_uses_actual_return_count() -> None:
-    """少返回时 Precision@K 的分母被稀释，实际返回精度是它的配对指标。"""
+    """分母是实际返回条数，不是 top_k：只返 1 条且命中时就是满分。"""
     case = _text_case()
     one = evaluate_case(case, "", [_text_source("受理与审核")])
-    assert one["precision_at_k"] == 1 / case.top_k
     assert one["precision_at_returned"] == 1.0
     empty = evaluate_case(case, "", [])
     assert empty["precision_at_returned"] is None
-    assert empty["precision_at_k"] == 0.0
     # 未命中任何单元的片段仍然计入「实际返回」，所以这个指标能掉下来。
     noise = evaluate_case(case, "", [_text_source("无关正文"), _text_source("批准")])
     assert noise["precision_at_returned"] == 0.5
 
 
 def test_duplicate_content_keeps_rank_but_does_not_score_twice() -> None:
-    """同内容多分片占排名，但不能把 Precision@K 刷高。"""
+    """同内容多分片占排名，但只算一个相关片段，返回精度会被稀释。"""
     case = _image_case()
     duplicate = _image_source("访问码 LIME-482")
     metrics = evaluate_case(case, "", [duplicate, dict(duplicate), dict(duplicate)])
     assert metrics["recall_at_k"] == 1.0
-    assert metrics["precision_at_k"] == 1 / case.top_k
+    assert metrics["precision_at_returned"] == 1 / 3
     assert metrics["mrr"] == 1.0
 
 
 def test_no_answer_cases_have_no_deterministic_gate() -> None:
-    """已知缺口（刻意接受）：四项指标对无答案题全部不适用。
+    """已知缺口（刻意接受）：三项指标对无答案题全部不适用。
 
     无答案题靠拒答判据单独评估，确定性层不设门禁；这条断言把缺口钉住，若以后
     补了门禁，这里会失败，提醒同步更新口径文档与执行记录。
@@ -285,16 +283,8 @@ class _StubCorpus:
 
 
 def _stub_corpus_for(*_args, **_kwargs) -> _StubCorpus:
-    """替掉语料工厂：本用例只关心上传失败后的证据与清理登记，不关心素材怎么来。"""
+    """替掉语料工厂：本用例只关心上传失败后的证据与失败归类，不关心素材怎么来。"""
     return _StubCorpus()
-
-
-class _Registry:
-    def __init__(self) -> None:
-        self.expected: list[str] = []
-
-    def expect(self, file_name: str) -> None:
-        self.expected.append(file_name)
 
 
 @pytest.mark.asyncio
@@ -324,14 +314,12 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(
         captured.extend(results)
 
     monkeypatch.setattr("quality.runner.write_reports", capture)
-    registry = _Registry()
     # run_id 必须唯一：runner 刻意拒绝覆盖已存在的报告目录，用固定 ID 会让这条
     # 用例第二次跑就失败。跑完清掉自己造的空目录，不留垃圾。
     run_id = "safe-" + uuid4().hex[:8]
     try:
         results = await run_quality_evaluation(
             _FailingUploadClient(),  # type: ignore[arg-type]
-            registry,  # type: ignore[arg-type]
             run_id,
             tmp_path,
             1,
@@ -343,11 +331,110 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(
         _remove_tree(Path(__file__).resolve().parents[2] / "reports" / "quality" / run_id)
     assert len(results) == 2
     assert captured == results
-    assert registry.expected[0] == "qa-rag-safe-run-x-corpus.md"
     failed, not_applicable = results
     assert failed.failure_reasons == ["RuntimeError"]
-    assert failed.bad_case_categories == ["上游模型或网络失败"]
+    # 上传失败属于「语料准备阶段」，不能记成「上游模型或网络失败」——这一阶段没调模型，
+    # 标错会把排查引向模型/网络（这条用例的客户端就是上传失败，正是那个 bug 的样子）。
+    assert failed.bad_case_categories == ["语料准备阶段失败"]
     # 无答案题不因上游失败被算成「失败题」，也不带失败原因。
     assert not_applicable.evaluation_status == "not_applicable"
     assert not_applicable.passed is None
     assert not_applicable.failure_reasons == []
+
+
+class _JudgeDownMatcher:
+    """判分端点不可用时的匹配器桩：证据判分一调就断连。"""
+
+    name = "semantic-llm"
+
+    def match_many(self, *_args: object, **_kwargs: object) -> dict:
+        import httpx
+        import openai
+
+        raise openai.APIConnectionError(request=httpx.Request("POST", "https://judge.invalid/v1"))
+
+
+class _JudgeDownCorpus:
+    primary_assets = ["primary"]
+    noise_assets: list[str] = []
+    document_file_names = ["qa-rag-judge-down-corpus.md"]
+    noise_file_names: list[str] = []
+    attachment_assets: list[str] = []
+    #: 是**集合**不是数量：`runner` 会 `len()` 它。
+    expected_unreferenced_attachments: tuple[str, ...] = ()
+
+
+class _JudgeDownClient:
+    """检索正常、判分断连的假客户端：上传与查询都不发请求，但查询能返回一条命中片段。"""
+
+    async def upload_stream(self, assets: list) -> list[dict]:
+        return [
+            {
+                "event": "file-result",
+                "result": {
+                    "status": "success",
+                    "document_id": "doc-1",
+                    "file_name": "qa-rag-judge-down-corpus.md",
+                    "referenced_image_count": 0,
+                    "matched_image_count": 0,
+                    "missing_image_count": 0,
+                },
+            },
+            {"event": "batch-complete"},
+        ]
+
+    async def query(self, _question: str, _top_k: int) -> dict:
+        # 正文片段与图片片段都给上：两题的单元都能落到某个片段上，证据判分才真的会被调用。
+        return {
+            "answer": "受理、审核、批准、归档。",
+            "sources": [_text_source("流程包含受理与审核"), _image_source("访问码 LIME-482")],
+        }
+
+
+@pytest.mark.asyncio
+async def test_judge_transport_failure_does_not_abort_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """判分断连只能废掉「这一题」，不能废掉整轮。
+
+    2026-09-17 的那轮 50 题就是这个样子：跑到第 9 题，确定性层的证据判分抛
+    `APIConnectionError`——它不是 `ValueError`，`SemanticMatcher` 与 `runner` 都接不住，
+    整个测试会话直接中止，后面 41 题一行报告都没写（50 题要跑 1~2 小时）。
+    """
+    cases = (_text_case(), _image_case())
+    (tmp_path / "cases.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "evidence_annotations.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "quality.runner.load_case_set",
+        lambda *_args, **_kwargs: CaseSet(
+            schema_version=LEGACY_SCHEMA_VERSION, dataset_dir=tmp_path,
+            cases_path=tmp_path / "cases.jsonl", cases=cases,
+        ),
+    )
+    monkeypatch.setattr("quality.runner.corpus_for", lambda *_args, **_kwargs: _JudgeDownCorpus())
+    monkeypatch.setattr("quality.runner.matcher_for_cases", lambda _cases: _JudgeDownMatcher())
+    monkeypatch.setattr("quality.runner.write_reports", lambda *_args, **_kwargs: None)
+    run_id = "jd-" + uuid4().hex[:8]
+    try:
+        results = await run_quality_evaluation(
+            _JudgeDownClient(),  # type: ignore[arg-type]
+            run_id,
+            tmp_path,
+            1,
+            0.01,
+            False,
+            "localhost",
+        )
+    finally:
+        _remove_tree(Path(__file__).resolve().parents[2] / "reports" / "quality" / run_id)
+    # 两题都要有结果——这正是修复前拿不到的东西。
+    assert [result.case_id for result in results] == ["TXT-001", "IMG-001"]
+    for result in results:
+        assert result.bad_case_categories == ["上游模型或网络失败"], result.failure_reasons
+        assert result.failure_reasons == ["Judge 执行失败：APIConnectionError"]
+        assert result.passed is False
+        # 指标按零命中写，不能因为「没判成」而看起来像通过。
+        assert result.deterministic_metrics["recall_at_k"] == 0.0
+        assert result.deterministic_metrics["mrr"] == 0.0
+        # 报告只留异常类型，不夹带端点与鉴权信息。
+        assert "judge.invalid" not in json.dumps(result.failure_reasons)

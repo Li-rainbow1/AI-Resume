@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-from quality.deepeval_adapter import ALL_METRIC_KEYS, RETRIEVAL_METRIC_KEYS
+from quality.deepeval_adapter import RETRIEVAL_METRIC_KEYS
 from quality.models import (
     IMAGE_KIND,
     LEGACY_SCHEMA_VERSION,
@@ -397,8 +397,81 @@ def load_interview_notes_v1(cases_path: Path, dataset_dir: Path) -> tuple[list[E
                 include_in_answer_aggregate=bool(payload.get("include_in_answer_aggregate", True)),
                 refusal_rubric=dict(refusal_rubric),
                 notes=str(payload.get("notes") or ""),
-                # 本集要求四项指标齐全，普通回答以 45 道有答案题作计划样本。
-                judge_metrics=ALL_METRIC_KEYS,
+                # 只声明检索侧两项。本集对应的业务接口是 `POST /api/ai/rag/query`，
+                # 它**不生成回答**：返回的 `answer` 是把检索命中的片段拼成的上下文摘要
+                # （产品侧 `build_answer_from_sources`，纯字符串拼装，不调模型），本来就
+                # 是喂给下游 prompt 用的。所以 Faithfulness 恒真（回答本身就是上下文）、
+                # Answer Relevancy 与 Contextual Relevancy 重复，两项在这条链路上都测不出
+                # 信号。生成侧两项归面试链路（`interview_runner.py` 打真实生成的
+                # `assistantReply`），45 道有答案题只做检索侧的计划样本。
+                judge_metrics=RETRIEVAL_METRIC_KEYS,
             )
         )
     return cases, assets
+
+
+_INTERVIEW_FORMAL_SCHEMA_VERSION = "interview-formal-v1"
+_INTERVIEW_FORMAL_REQUIRED_FIELDS = {"case_id", "group", "request", "should_refuse"}
+_INTERVIEW_FORMAL_USER_INPUT_MAX_CHARS = 240
+_INTERVIEW_FORMAL_GROUPS = {"normal", "no_evidence"}
+
+
+@register_loader(_INTERVIEW_FORMAL_SCHEMA_VERSION)
+def load_interview_formal_v1(cases_path: Path, dataset_dir: Path) -> tuple[list[EvalCase], list[CorpusAsset]]:
+    """面试生成侧评测集：每题一个 `request`（直接作为 turn/stream 请求体）。
+
+    题目不是检索题：没有 answer_units / 证据标注，判分输入在**采集时**从 done 事件
+    组装（`actual_output` = assistantReply，`retrieval_context` = sources）。loader 只
+    负责 schema 校验与题数统计，供冻结生成器与自检使用；采集由 `interview_runner`
+    按行直接驱动。语料与 interview-notes-v1 同源（指纹一致 ⇒ 常驻复用），由
+    `corpus_manifest.json` 与冻结清单的 `files_sha256` 负责，不走 `verify_corpus`。
+    """
+    cases: list[EvalCase] = []
+    seen_ids: set[str] = set()
+    for payload in iter_cases(cases_path):
+        missing = _INTERVIEW_FORMAL_REQUIRED_FIELDS - payload.keys()
+        if missing:
+            raise ValueError(f"第 {payload.get('case_id')} 题缺少字段：{sorted(missing)}")
+        case_id = str(payload["case_id"])
+        if case_id in seen_ids:
+            raise ValueError(f"case_id 重复：{case_id}")
+        seen_ids.add(case_id)
+        group = str(payload["group"])
+        if group not in _INTERVIEW_FORMAL_GROUPS:
+            raise ValueError(f"分组合法性：{case_id} -> {group}")
+        should_refuse = bool(payload["should_refuse"])
+        if group == "no_evidence" and not should_refuse:
+            raise ValueError(f"无依据题必须声明 should_refuse：{case_id}")
+        if group == "normal" and should_refuse:
+            raise ValueError(f"有依据题不应声明 should_refuse：{case_id}")
+        request = payload["request"]
+        if not isinstance(request, dict):
+            raise ValueError(f"request 必须是对象：{case_id}")
+        user_input = str(request.get("userInput") or "").strip()
+        if not user_input:
+            raise ValueError(f"userInput 为空：{case_id}")
+        if len(user_input) > _INTERVIEW_FORMAL_USER_INPUT_MAX_CHARS:
+            raise ValueError(
+                f"userInput 超过 {_INTERVIEW_FORMAL_USER_INPUT_MAX_CHARS} 字（检索 query 截断线）：{case_id}"
+            )
+        reference_answer = str(payload.get("reference_answer") or "")
+        if group == "normal" and not reference_answer:
+            raise ValueError(f"有依据题缺少参考答案：{case_id}")
+        cases.append(
+            EvalCase(
+                schema_version=_INTERVIEW_FORMAL_SCHEMA_VERSION,
+                case_id=case_id,
+                question=user_input,
+                reference_answer=reference_answer,
+                top_k=4,
+                answerable=True,
+                units=(),
+                expected_documents=(),
+                question_type=group,
+                topic=str(payload.get("topic") or ""),
+                # 生成侧两项归本链路；检索侧三项对本集无意义（不检索判分）。
+                judge_metrics=("faithfulness", "answer_relevancy"),
+                notes=str(payload.get("source_case_id") or ""),
+            )
+        )
+    return cases, []

@@ -257,7 +257,7 @@ def test_legacy_dataset_still_loads_and_scores(tmp_path: Path) -> None:
     source = {"content": "访问码 LIME-482", "metadata": {
         "originalFilename": "qa-rag-run-x-quality-corpus.md", "ingestSource": "text_document"}}
     assert evaluate_case(text_case, "", [source]) == {
-        "recall_at_k": 1.0, "precision_at_k": 1 / 4, "precision_at_returned": 1.0, "mrr": 1.0,
+        "recall_at_k": 1.0, "precision_at_returned": 1.0, "mrr": 1.0,
     }
 
 
@@ -307,9 +307,9 @@ def test_notes_dataset_loads_units_and_selectors(tmp_path: Path) -> None:
     assert all(unit.required_parts == 1 for unit in answerable.units)
     assert answerable.units[1].selectors[0].kind == IMAGE_KIND
     assert answerable.units[1].selectors[0].locator == "corpus/附件/a.png"
-    assert answerable.judge_metrics == (
-        "contextual_recall", "contextual_relevancy", "faithfulness", "answer_relevancy"
-    )
+    # 本集只测检索侧：接口 /api/ai/rag/query 不生成回答（返回的 answer 是检索片段拼成的
+    # 上下文摘要），生成侧两项在这条链路上恒真/与检索侧重复，声明了也测不出信号。
+    assert answerable.judge_metrics == ("contextual_recall", "contextual_relevancy")
     assert no_answer.answerable is False and no_answer.units == ()
     assert no_answer.refusal_rubric["pass"] == ["明确说明资料未提供"]
 

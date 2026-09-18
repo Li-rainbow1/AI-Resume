@@ -1,15 +1,15 @@
 """确定性检索指标。
 
-四项指标只读「答案单元」与「检索返回的来源」，完全不看回答文本——回答正确性
+三项指标只读「答案单元」与「检索返回的来源」，完全不看回答文本——回答正确性
 由 DeepEval 那几项承担。这里不认识任何数据集字段名：旧集的正则与新集的语义
 判分都通过 `quality.matchers.EvidenceMatcher` 注入。
 
 口径（与数据集 README 对齐）：
 - `recall_at_k`：TopK 内被覆盖的答案单元数 / 单元总数。一个单元可以由多条片段
   合起来支持，同一单元不重复计分。
-- `precision_at_k`：TopK 内真正支持了至少一个所问事实的非重复片段数 / top_k。
 - `precision_at_returned`：相关非重复片段数 / 实际返回片段数；无返回记 N/A。
-  它和上一个分母不同，两个都要看，避免把「少返回」混同成「返回准」。
+  分母是「实际返回条数」而非 top_k，因此它回答的是「返回的这批准不准」；实际
+  返回可能少于 top_k（上游按相似度阈值裁过），少返回不在这里额外扣分。
 - `mrr`：首个真正相关片段排名的倒数，没有相关结果为 0。
 """
 
@@ -33,7 +33,7 @@ from quality.sources import SourceView, view_source, view_sources
 
 SCORING_VERSION = "evidence-v4"
 
-RETRIEVAL_METRICS = ("recall_at_k", "precision_at_k", "precision_at_returned", "mrr")
+RETRIEVAL_METRICS = ("recall_at_k", "precision_at_returned", "mrr")
 
 
 def normalize_text(value: object) -> str:
@@ -146,7 +146,7 @@ def evaluate_case(
     sources: list[dict[str, Any]],
     matcher: EvidenceMatcher | None = None,
 ) -> dict[str, float | None]:
-    """四项检索指标；无答案题为 N/A，不返回 0 或 1 以免稀释汇总均值。"""
+    """三项检索指标；无答案题为 N/A，不返回 0 或 1 以免稀释汇总均值。"""
     detail = evidence_details(case, sources, matcher)
     if detail["status"] == "not_applicable":
         return dict.fromkeys(RETRIEVAL_METRICS)
@@ -155,7 +155,6 @@ def evaluate_case(
     returned = int(detail["returned_count"])
     return {
         "recall_at_k": sum(unit["covered"] for unit in units.values()) / len(units),
-        "precision_at_k": len(relevant) / case.top_k,
         "precision_at_returned": len(relevant) / returned if returned else None,
         "mrr": 1.0 / relevant[0]["rank"] if relevant else 0.0,
     }
@@ -179,10 +178,6 @@ def recall_at_k(case: EvalCase, sources: list[dict[str, Any]], matcher: Evidence
     return evaluate_case(case, "", sources, matcher)["recall_at_k"]
 
 
-def precision_at_k(case: EvalCase, sources: list[dict[str, Any]], matcher: EvidenceMatcher | None = None) -> float | None:
-    return evaluate_case(case, "", sources, matcher)["precision_at_k"]
-
-
 def mrr(case: EvalCase, sources: list[dict[str, Any]], matcher: EvidenceMatcher | None = None) -> float | None:
     return evaluate_case(case, "", sources, matcher)["mrr"]
 
@@ -195,7 +190,6 @@ __all__ = [
     "mrr",
     "normalize_evidence_content",
     "normalize_text",
-    "precision_at_k",
     "recall_at_k",
     "retrieval_metrics",
     "selector_matches",

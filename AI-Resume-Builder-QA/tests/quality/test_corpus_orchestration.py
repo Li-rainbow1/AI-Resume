@@ -12,9 +12,9 @@
   manifest 里的 `relativePath` 把附件挂到正文；路径写错不会有任何报错，只会让图片
   静默挂不上、图片题永久无解。
 - **正文必须与数据集声明的 `sha256` 逐字节一致**。哈希是证据行号可信的前提。唯一一次
-  有意的改写（Obsidian `![[...]]` → 常规 Markdown 链接）发生在**冻结生成时**并已记入
-  `corpus_manifest.json` 的 `transformations`；运行期再做任何「顺手修一下 Markdown」
-  都会让落盘内容与清单失配。
+  有意的改写（Obsidian `![[...]]` → 常规 Markdown 链接，且文件名里的空格编码成 `%20`）
+  发生在**冻结生成时**并已记入 `corpus_manifest.json` 的 `transformations`；运行期再做
+  任何「顺手修一下 Markdown」都会让落盘内容与清单失配。
 - **每一个附件都要有归属**：要么被正文引用，要么被数据集点名为已知的未引用项。
   差额对不上说明语料或正文被改过，而这件事不会体现在任何一项指标上。
 """
@@ -39,6 +39,7 @@ from quality.models import (
     QualityCorpus,
     SourceSelector,
 )
+from quality.resident_corpus import corpus_token, find_reusable_documents
 from quality.runner import run_quality_evaluation
 
 DATASET = Path(__file__).resolve().parents[2] / "testdata" / "quality" / "interview-notes-v1"
@@ -115,11 +116,12 @@ def test_unregistered_schema_is_rejected_before_upload(tmp_path: Path) -> None:
 
 @requires_local_corpus
 def test_unreferenced_attachments_are_declared_not_tolerated() -> None:
-    """未引用附件只能「点名声明」，不能静默容忍。
+    r"""未引用附件只能「点名声明」，不能静默容忍。
 
     `interview-notes-v1` 声明的是**空集**：冻结生成时已把 `6-计算机网络.md` 第 74 行的
-    Obsidian 链接归一化成常规 Markdown 写法，64 张附件全部有正文归属，多一张少一张都算
-    语料漂移。声明位保留，供将来真出现「挂不上的附件」时点名。
+    Obsidian 链接归一化成常规 Markdown 写法（空格编码为 `%20`，否则会被后端
+    `[^\s)\r\n]+` 截断），64 张附件全部有正文归属，多一张少一张都算语料漂移。声明位保留，
+    供将来真出现「挂不上的附件」时点名。
     """
     assert expected_unreferenced_for(_notes_case_set()) == ()
     legacy = CaseSet(
@@ -251,17 +253,121 @@ class _FakeRagClient:
         return {"answer": "", "sources": []}
 
 
-class _Registry:
-    def __init__(self) -> None:
-        self.expected: list[str] = []
-        self.registered: dict[str, str] = {}
+class _LibraryClient:
+    """带可变库状态的假客户端：只实现常驻语料核对需要的两个方法。"""
 
-    def expect(self, file_name: str) -> None:
-        self.expected.append(file_name)
+    def __init__(self, documents: list[dict]) -> None:
+        self.documents = documents
+        self.deleted: list[str] = []
 
-    def register(self, document_id: str, file_name: str) -> None:
-        self.expected.append(file_name)
-        self.registered[document_id] = file_name
+    async def list_all_documents(self) -> list[dict]:
+        return [item for item in self.documents if item["documentId"] not in self.deleted]
+
+    async def delete_document(self, document_id: str) -> dict:
+        self.deleted.append(document_id)
+        return {"status": "deleted"}
+
+
+def _resident_case_set(tmp_path: Path, names: tuple[str, ...]) -> CaseSet:
+    """带素材指纹的数据集：指纹由素材 (relative_path, sha256) 决定，不依赖真实语料。"""
+    return CaseSet(
+        schema_version=NOTES_SCHEMA,
+        dataset_dir=tmp_path,
+        cases_path=tmp_path / "cases.jsonl",
+        cases=(),
+        assets=tuple(
+            CorpusAsset(relative_path=f"corpus/{name}", sha256="0" * 64, kind="document")
+            for name in names
+        ),
+    )
+
+
+def _resident_corpus_for(case_set: CaseSet) -> QualityCorpus:
+    token = corpus_token(case_set)
+    file_names = [f"qa-rag-{token}-{name}" for name in ("1-测试.md", "5-Redis.md")]
+    return QualityCorpus(
+        primary_assets=[UploadAsset(Path(name), "text/markdown", name) for name in file_names],
+        noise_assets=[],
+        document_file_names=file_names,
+        noise_file_names=[],
+        expected_unreferenced_attachments=(),
+    )
+
+
+def _library_item(token: str, name: str, document_id: str, status: str = "ready") -> dict:
+    return {
+        "documentId": document_id,
+        "fileName": f"qa-rag-{token}-{name}",
+        "status": status,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resident_corpus_is_reused_when_library_matches(tmp_path: Path) -> None:
+    """指纹前缀的正文齐且全部 ready ⇒ 复用：返回映射、不删任何东西。"""
+    case_set = _resident_case_set(tmp_path, ("1-测试.md", "5-Redis.md"))
+    corpus = _resident_corpus_for(case_set)
+    token = corpus_token(case_set)
+    client = _LibraryClient([
+        _library_item(token, "1-测试.md", "doc-1"),
+        _library_item(token, "5-Redis.md", "doc-2"),
+    ])
+
+    reusable = await find_reusable_documents(client, case_set, corpus)
+
+    assert reusable == {"qa-rag-{0}-1-测试.md".format(token): "doc-1",
+                        "qa-rag-{0}-5-Redis.md".format(token): "doc-2"}
+    assert client.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_incomplete_resident_set_is_purged_and_reimported(tmp_path: Path) -> None:
+    """同指纹但只剩半套（正文被单独删过）⇒ 清掉半套、返回 None 走重导。"""
+    case_set = _resident_case_set(tmp_path, ("1-测试.md", "5-Redis.md"))
+    corpus = _resident_corpus_for(case_set)
+    token = corpus_token(case_set)
+    client = _LibraryClient([_library_item(token, "1-测试.md", "doc-1")])
+
+    reusable = await find_reusable_documents(client, case_set, corpus)
+
+    assert reusable is None
+    assert client.deleted == ["doc-1"]
+
+
+@pytest.mark.asyncio
+async def test_stale_fingerprint_documents_are_purged(tmp_path: Path) -> None:
+    """语料换版后旧指纹前缀的文档不再是任何声明 ⇒ 清掉，新指纹照常复用。"""
+    case_set = _resident_case_set(tmp_path, ("1-测试.md", "5-Redis.md"))
+    corpus = _resident_corpus_for(case_set)
+    token = corpus_token(case_set)
+    client = _LibraryClient([
+        _library_item("resident-OLD-fingerprint", "1-测试.md", "doc-old"),
+        _library_item(token, "1-测试.md", "doc-1"),
+        _library_item(token, "5-Redis.md", "doc-2"),
+    ])
+
+    reusable = await find_reusable_documents(client, case_set, corpus)
+
+    assert reusable is not None and len(reusable) == 2
+    assert client.deleted == ["doc-old"]
+
+
+@pytest.mark.asyncio
+async def test_non_resident_documents_are_left_alone(tmp_path: Path) -> None:
+    """run 前缀的普通测试数据不归常驻管理：既不算复用依据，也绝不能被顺手删掉。"""
+    case_set = _resident_case_set(tmp_path, ("1-测试.md", "5-Redis.md"))
+    corpus = _resident_corpus_for(case_set)
+    token = corpus_token(case_set)
+    client = _LibraryClient([
+        {"documentId": "doc-run", "fileName": "qa-rag-notes-v1-20260917i-1-测试.md", "status": "ready"},
+        _library_item(token, "1-测试.md", "doc-1"),
+        _library_item(token, "5-Redis.md", "doc-2"),
+    ])
+
+    reusable = await find_reusable_documents(client, case_set, corpus)
+
+    assert reusable is not None and len(reusable) == 2
+    assert client.deleted == []
 
 
 def _remove_tree(root: Path) -> None:
@@ -284,7 +390,7 @@ async def _run_corpus_stage(
     monkeypatch: pytest.MonkeyPatch,
     corpus: QualityCorpus,
     client: _FakeRagClient,
-) -> tuple[list, _Registry]:
+) -> list:
     """只驱动入库段：加载器与语料工厂都换成桩，判分走离线的正则匹配器。"""
     (tmp_path / "cases.jsonl").write_text("", encoding="utf-8")
     (tmp_path / "evidence_annotations.json").write_text("{}", encoding="utf-8")
@@ -299,12 +405,10 @@ async def _run_corpus_stage(
     )
     monkeypatch.setattr("quality.runner.corpus_for", lambda *_args, **_kwargs: corpus)
     monkeypatch.setattr("quality.runner.write_reports", lambda *_args, **_kwargs: None)
-    registry = _Registry()
     run_id = "tc-" + uuid4().hex[:8]
     try:
         results = await run_quality_evaluation(
             client,  # type: ignore[arg-type]
-            registry,  # type: ignore[arg-type]
             run_id,
             tmp_path,
             1,
@@ -314,17 +418,18 @@ async def _run_corpus_stage(
         )
     finally:
         _remove_tree(Path(__file__).resolve().parents[2] / "reports" / "quality" / run_id)
-    return results, registry
+    return results
 
 
 @pytest.mark.asyncio
-async def test_every_document_is_registered_and_enriched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """每篇正文都要登记进清理注册表，有图片的逐篇轮询解析。"""
+async def test_every_document_is_verified_and_enriched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """每篇正文都要经后端逐篇回传核验，有图片的逐篇轮询解析。"""
     corpus = _corpus()
     client = _FakeRagClient()
-    _, registry = await _run_corpus_stage(tmp_path, monkeypatch, corpus, client)
+    results = await _run_corpus_stage(tmp_path, monkeypatch, corpus, client)
 
-    assert set(registry.registered.values()) == set(corpus.document_file_names)
+    # 上传后的题目按「语料准备失败」以外的方式继续跑（这里查询返回空命中）。
+    assert results[0].evaluation_status in {"failed", "not_applicable"}
     assert client.polls == [f"doc-{name}" for name in corpus.document_file_names]
     # 正文与附件同批上传，不允许拆成两批。
     assert len(client.batches) == 1
@@ -335,7 +440,7 @@ async def test_every_document_is_registered_and_enriched(tmp_path: Path, monkeyp
 async def test_missing_image_reference_stops_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """有引用找不到附件时必须当场失败：相关题目会变成永久无解。"""
     client = _FakeRagClient(missing_on="qa-rag-tc-2.md")
-    results, _ = await _run_corpus_stage(tmp_path, monkeypatch, _corpus(), client)
+    results = await _run_corpus_stage(tmp_path, monkeypatch, _corpus(), client)
 
     # 走「上传阶段失败」分支：不判通过，失败原因只留异常类型（不泄漏原始正文）。
     assert [result.passed for result in results] == [False]
@@ -354,5 +459,5 @@ async def test_attachment_surplus_must_match_the_declared_exceptions(
     这类漂移不会体现在任何一项指标上，只能在这里拦住。
     """
     client = _FakeRagClient(per_document=(2, 2))
-    results, _ = await _run_corpus_stage(tmp_path, monkeypatch, _corpus(), client)
+    results = await _run_corpus_stage(tmp_path, monkeypatch, _corpus(), client)
     assert results[0].failure_reasons == ["AssertionError"]

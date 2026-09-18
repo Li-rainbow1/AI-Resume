@@ -11,15 +11,20 @@ from uuid import uuid4
 import httpx
 
 from clients.auth import AuthClient
-from clients.rag import RagClient, UploadAsset
+from clients.rag import RagClient
 from fixtures.config import QaSettings
-from fixtures.lifecycle import CreatedDocumentRegistry
 from quality.deepeval_adapter import judge_config_summary
 from quality.freeze import FREEZE_MANIFEST_NAME, read_manifest as read_freeze_manifest
 from quality.freeze import verify_files as verify_frozen_files
 from quality.freeze import verify_judge as verify_frozen_judge
 from quality.freeze import verify_services as verify_frozen_services
 from quality.judge import judge_config_from_environment
+from quality.models import CorpusAsset
+from quality.resident_corpus import (
+    RESIDENT_ROOT_PREFIX,
+    find_reusable_by_prefix,
+    resident_prefix_for,
+)
 from quality.runtime_guard import real_model_guard_reason
 from quality.settings import QualitySettings
 
@@ -82,83 +87,15 @@ def evaluate_reply(question, reply, context):
                 # 与 deepeval_adapter 同一失败口径：把 metric.error 带出来，
                 # 免得「判分器没给分」只留一个看不出原因的裸异常。
                 raise RuntimeError(f"{type(metric).__name__} 未返回分数：{metric.error or '未记录原因'}")
+            # 09-14 的坑：Judge 返回空 verdict 时 Faithfulness 兜底记满分——那不是
+            # 「答得忠实」，是「根本没判」。必须拦下，不能让这种轮次混进均值。
+            if name == "faithfulness" and getattr(metric, "verdicts", None) == []:
+                raise RuntimeError("faithfulness 返回空 verdict（会兜底满分），该轮判分无效")
             values.append(float(metric.score))
             reasons.append(str(metric.reason or ""))
         scores[name] = {"score": sum(values) / len(values), "scores": values, "reasons": reasons,
                         "passed": all(value >= config["threshold"] for value in values)}
     return scores
-
-
-def collect_context(capture, request):
-    message = capture["message"]
-    payload = json.loads(message[message.index("{"):])
-    if payload.get("userInput") != request["userInput"] or payload.get("mode") != "interviewer":
-        raise ValueError("采集记录与当前请求不一致")
-    context = [str(item) for item in payload.get("resume") or []]
-    history = payload.get("history") or []
-    context.extend(f"{item['role']}：{item['content']}" for item in history)
-    if payload.get("memorySummary"):
-        context.append("历史摘要：" + payload["memorySummary"])
-    if payload.get("ragReference"):
-        context.append("实际知识库参考：" + payload["ragReference"])
-    # 当前用户问题提供语境，不作为个人经历真实性的证明。
-    question = json.dumps({"history": history, "memorySummary": payload.get("memorySummary", ""),
-                           "question": payload["userInput"]}, ensure_ascii=False)
-    return payload, question, context
-
-
-def score_saved(report):
-    """原样重评已采集的回复，独立落盘，不重跑面试或覆盖采集结果。
-
-    重评与采集走**同一道冻结门禁**：判分口径或评测代码任何一项变了，重评出的数字就不能
-    与已冻的报告并列比较，所以这里先核清单再动手。
-
-    只核**数据集文件 + 评测代码 + 判分器**，不核 `services`——重评不发任何被测系统请求、
-    也不重新检索，被测服务的配置不在这一轮的因果链上；它属于采集轮，已记在该轮 summary。
-
-    少了这道校验，重评就是一条绕过门禁的路：换个 Judge 端点重评同一份采集结果，产出的
-    分数照样能写进报告，而没有任何一处会拦。
-    """
-    QaSettings.from_environment()
-    dataset = INTERVIEW_DATASET
-    manifest = read_freeze_manifest(dataset)
-    if manifest is None:
-        raise ValueError(f"面试重评缺少冻结清单：{dataset / FREEZE_MANIFEST_NAME}")
-    # 键相对 QA 仓库根，用 __file__ 推而不是 cwd：从别的目录启动时不该换一套基准。
-    verify_frozen_files(dataset, Path(__file__).resolve().parents[1], manifest)
-    verify_frozen_judge(manifest, "interview_judge", runtime_judge_config())
-    source = Path(report) / "case-results.jsonl"
-    rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
-    for row in rows:
-        row["status"] = "pending"
-        row["metrics"] = {}
-        row.pop("error_type", None)
-        row.pop("error_chain", None)
-    destination = Path(report).parent / ("interview-judge-" + uuid4().hex[:8])
-    destination.mkdir(exist_ok=False)
-    config = {"judge": runtime_judge_config(), "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-              "source_report": str(source.resolve()), "expected_count": len(rows),
-              "freeze_manifest_sha256": hashlib.sha256((dataset / FREEZE_MANIFEST_NAME).read_bytes()).hexdigest()}
-    for row in rows:
-        row["metrics"] = {}
-        row["status"] = "failed"
-        try:
-            _, question, context = collect_context(row["capture"], row["request"])
-            if context != row["actual_retrieval_context"] or question != row["judge_input"]:
-                raise ValueError("保存的评分依据与实际采集不一致")
-            row["metrics"] = evaluate_reply(question, row["actual_output"], context)
-            row["status"] = "completed"
-        except Exception as exc:
-            row["error_type"] = type(exc).__name__
-            row["error_chain"] = error_types(exc)
-        (destination / "case-results.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-        print(row["case_id"], row["status"], flush=True)
-    completed = [row for row in rows if row["status"] == "completed"]
-    config.update(completed_count=len(completed), failed_count=len(rows) - len(completed),
-                  aggregate={name: sum(row["metrics"][name]["score"] for row in completed) / len(completed)
-                             for name in ("faithfulness", "answer_relevancy")} if completed else {})
-    (destination / "summary.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(str(destination), flush=True)
 
 
 async def run(case_ids=None, judge=True):
@@ -181,14 +118,29 @@ async def run(case_ids=None, judge=True):
     results = []
     config = {"run_id": settings.run_id, "expected_count": len(cases), "judge": runtime_judge_config() if judge else None,
               "dataset_sha256": hashlib.sha256((dataset / "cases.jsonl").read_bytes()).hexdigest(),
-              "scope": "真实面试接口；QA 模型客户端调用参数旁路采集", "session_ids": []}
+              "scope": "真实面试接口（NDJSON 流）；判分输入全部来自 done 事件，不依赖业务侧埋点",
+              "session_ids": []}
 
     def save():
         (report / "case-results.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in results), encoding="utf-8")
-        done = [r for r in results if r["status"] == "completed"]
-        config.update(completed_count=len(done), failed_count=sum(r["status"] == "failed" for r in results),
-                      aggregate={name: sum(r["metrics"][name]["score"] for r in done) / len(done)
-                                 for name in ("faithfulness", "answer_relevancy")} if judge and done else {})
+        by_group = {"normal": [], "no_evidence": []}
+        for row in results:
+            if row["status"] == "completed" and judge:
+                by_group.setdefault(row.get("group") or "normal", []).append(row)
+        excluded = sum(r["status"] == "excluded" for r in results)
+        failed = sum(r["status"] == "failed" for r in results)
+        config.update(
+            completed_count=sum(r["status"] == "completed" for r in results),
+            failed_count=failed,
+            excluded_count=excluded,
+            aggregate={name: sum(row["metrics"][name]["score"] for row in rows) / len(rows)
+                       for name in ("faithfulness", "answer_relevancy")
+                       for rows in [by_group["normal"]] if judge and rows},
+            no_evidence_control={name: sum(row["metrics"][name]["score"] for row in rows) / len(rows)
+                                 for name in ("faithfulness", "answer_relevancy")
+                                 for rows in [by_group["no_evidence"]] if judge and rows},
+            completed_by_group={group: len(rows) for group, rows in by_group.items()},
+        )
         (report / "summary.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     async with httpx.AsyncClient(base_url=settings.base_url, timeout=180) as client:
@@ -196,8 +148,16 @@ async def run(case_ids=None, judge=True):
         client.headers["Authorization"] = "Bearer " + session.access_token
         rag = RagClient(client)
         guard = await real_model_guard_reason(rag)
-        if guard or await rag.list_all_documents():
-            raise ValueError(guard or "QA 知识库非空，拒绝混入其他数据")
+        # 常驻语料（质量评测驻留的知识库素材）不算「混入数据」：它们有固定指纹前缀，
+        # 由质量评测自己按指纹维护生命周期。
+        resident_or_unexpected = [
+            d for d in await rag.list_all_documents()
+            if not str(d.get("fileName") or "").startswith(RESIDENT_ROOT_PREFIX)
+        ]
+        if guard or resident_or_unexpected:
+            raise ValueError(
+                guard or f"QA 知识库含 {len(resident_or_unexpected)} 篇非常驻文档，拒绝混入其他数据"
+            )
         manifest = read_freeze_manifest(dataset)
         if manifest is None:
             raise ValueError(f"面试评测缺少冻结清单：{dataset / FREEZE_MANIFEST_NAME}")
@@ -211,79 +171,102 @@ async def run(case_ids=None, judge=True):
             (dataset / FREEZE_MANIFEST_NAME).read_bytes()).hexdigest()
         config["services"] = [{"serviceKey": r["serviceKey"], "model": (r.get("config") or {}).get("model")}
                               for r in await rag.list_system_services() if r["serviceKey"] in {"chat", "embedding", "vision"}]
-        registry = CreatedDocumentRegistry(expected_prefix=f"qa-rag-{settings.run_id}-")
-        try:
-            assets = report / "assets"
-            assets.mkdir()
-            for original in sorted((dataset / "corpus").glob("*.md")):
-                target = assets / f"qa-rag-{settings.run_id}-{original.name}"
-                target.write_bytes(original.read_bytes())
-                registry.expect(target.name)
-                events = await rag.upload_stream([UploadAsset(target, "text/markdown", target.name)])
-                successful = [e["result"] for e in events if e.get("event") == "file-result" and e.get("result", {}).get("status") == "success"]
-                if len(successful) != 1 or not any(e.get("event") == "batch-complete" for e in events):
-                    raise ValueError("面试知识库上传失败")
-                registry.register(successful[0]["document_id"], target.name)
-            for row in cases:
-                capture_id = f"qa-int-{settings.run_id}-{row['case_id'].lower()}"
-                request = {**row["request"], "requestId": capture_id}
-                result = {"case_id": row["case_id"], "status": "failed", "request": request, "metrics": {}}
-                try:
-                    events = []
-                    async with client.stream("POST", "/api/ai/interview/turn/stream", json=request,
-                                             headers={"X-QA-Capture-ID": capture_id}) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if line.strip():
-                                events.append(json.loads(line))
-                    result["events"] = events
-                    terminal = [e for e in events if e.get("event") == "done"]
-                    if len(terminal) != 1 or any(e.get("event") == "error" for e in events):
-                        raise ValueError("面试流未正常完成")
-                    output = terminal[0]["data"]
-                    output = json.loads(output) if isinstance(output, str) else output
-                    reply = str(output.get("assistantReply") or "").strip()
-                    if not reply:
-                        raise ValueError("真实回复为空")
-                    config["session_ids"].append(output.get("sessionId"))
-                    capture_path = Path("reports/interview-captures") / f"{capture_id}.json"
-                    capture = json.loads(capture_path.read_text(encoding="utf-8"))
-                    if capture.get("capture_id") != capture_id:
-                        raise ValueError("采集 ID 与当前回合不一致")
-                    if capture.get("capture_code_sha256") != hashlib.sha256(Path(__file__).with_name("interview_capture.py").read_bytes()).hexdigest():
-                        raise ValueError("QA 采集程序版本不一致，请重启隔离后端")
-                    payload, question, context = collect_context(capture, request)
-                    result.update(actual_output=reply, actual_retrieval_context=context, actual_model_payload=payload,
-                                  capture=capture, judge_input=question, response=output)
-                    # 即使 Judge 超时或失败，也先保存真实回复和上下文，支持原样重评。
-                    results.append(result)
-                    save()
-                    if capture.get("rag_error"):
-                        raise ValueError("本轮面试检索异常")
-                    if judge:
-                        result["metrics"] = await asyncio.to_thread(evaluate_reply, question, reply, context)
-                    result["status"] = "completed"
-                except Exception as exc:
-                    result["error_type"] = type(exc).__name__
-                    result["error_chain"] = error_types(exc)
-                if result not in results:
-                    results.append(result)
+
+        # 语料：复用检索评测驻留的常驻语料（corpus_manifest 与 notes-v1 逐字节同源 ⇒
+        # 指纹一致 ⇒ 同一前缀）。本链路只消费不重建：驻留缺失说明常驻语料还没建立，
+        # 让用户先跑检索评测，而不是在这里传一份「没有附件的半套」。
+        corpus_manifest = json.loads((dataset / "corpus_manifest.json").read_text(encoding="utf-8"))
+        assets = [
+            CorpusAsset(relative_path=str(item["path"]), sha256=str(item["sha256"]),
+                        kind=str(item.get("kind") or "document"))
+            for item in corpus_manifest["assets"]
+        ]
+        prefix = resident_prefix_for("interview-notes-v1", assets)
+        expected_names = {
+            f"{prefix}{Path(item['path']).name}"
+            for item in corpus_manifest["assets"] if str(item.get("kind") or "document") == "document"
+        }
+        resident_docs = await find_reusable_by_prefix(rag, prefix, expected_names)
+        if resident_docs is None:
+            raise ValueError(
+                f"常驻语料缺失或不完整（前缀 {prefix}，应为 {len(expected_names)} 篇 ready 正文）。"
+                "先跑检索评测（pytest tests/quality/test_real_rag_quality.py -m quality_eval）建立驻留语料。"
+            )
+        config["resident_corpus"] = {"prefix": prefix, "reused_documents": len(resident_docs)}
+
+        for row in cases:
+            capture_id = f"qa-int-{settings.run_id}-{row['case_id'].lower()}"
+            request = {
+                **row["request"],
+                "requestId": capture_id,
+                # 每题独立会话：题与题之间不共享 history，保证「一题一评」可复现。
+                "sessionId": f"qa-int-{settings.run_id}-{row['case_id'].lower()}",
+            }
+            result = {"case_id": row["case_id"], "group": row.get("group") or "normal",
+                      "topic": row.get("topic") or "", "status": "failed",
+                      "question": row["request"].get("userInput"), "request": request, "metrics": {}}
+            try:
+                events = []
+                # 该流是 NDJSON（application/x-ndjson，每行一个 {"event","data"}），
+                # 不是 SSE——按 SSE 的 `data:` 行解析会得到 0 事件。
+                async with client.stream("POST", "/api/ai/interview/turn/stream", json=request) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if line:
+                            events.append(json.loads(line))
+                terminal = [e for e in events if e.get("event") == "done"]
+                if len(terminal) != 1 or any(e.get("event") == "error" for e in events):
+                    raise ValueError("面试流未正常完成")
+                output = terminal[0]["data"]
+                output = json.loads(output) if isinstance(output, str) else output  # done.data 需二次解析
+                reply = str(output.get("assistantReply") or "").strip()
+                if not reply:
+                    raise ValueError("真实回复为空")
+                meta = output.get("meta") or {}
+                result["meta"] = meta
+                result["session_id"] = output.get("sessionId")
+                config["session_ids"].append(output.get("sessionId"))
+                # 判分输入全部来自 done 事件：回复 + 该轮真实检索到的片段。
+                context = [
+                    str(item.get("content") or "")
+                    for item in (output.get("sources") or [])
+                    if isinstance(item, dict)
+                ]
+                result.update(actual_output=reply, actual_retrieval_context=context,
+                              response={"assistantReply": reply, "sources": output.get("sources") or [],
+                                        "nextAction": output.get("nextAction")})
+                results.append(result)
                 save()
-                print(row["case_id"], result["status"], flush=True)
-        finally:
-            await registry.cleanup(rag)
-            config["remaining_documents"] = len(await rag.list_all_documents())
+                # 检索失败（ragError 非空）归检索侧，不算生成质量问题：排除出判分，
+                # 也不进任何均值；检索评测自身会兜住这类故障。
+                if str(meta.get("ragError") or "").strip():
+                    result["status"] = "excluded"
+                    result["excluded_reason"] = "ragError: " + str(meta["ragError"])[:200]
+                    results[-1] = result
+                    save()
+                    print(row["case_id"], "excluded", flush=True)
+                    continue
+                if judge:
+                    result["metrics"] = await asyncio.to_thread(
+                        evaluate_reply, json.dumps({"question": request["userInput"]}, ensure_ascii=False), reply, context
+                    )
+                result["status"] = "completed"
+            except Exception as exc:
+                result["error_type"] = type(exc).__name__
+                result["error_chain"] = error_types(exc)
+            if result not in results:
+                results.append(result)
             save()
+            print(row["case_id"], result["status"], flush=True)
+        config["remaining_documents"] = len(await rag.list_all_documents())
+        save()
     print(str(report), flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cases", nargs="*")
-    parser.add_argument("--capture-only", action="store_true")
-    parser.add_argument("--score-saved", type=Path)
+    parser.add_argument("--cases", nargs="*", help="只采集这些 case_id；缺省跑全量 35 题")
+    parser.add_argument("--capture-only", action="store_true", help="只采集真实回复不判分")
     args = parser.parse_args()
-    if args.score_saved:
-        score_saved(args.score_saved)
-    else:
-        asyncio.run(run(args.cases, judge=not args.capture_only))
+    asyncio.run(run(args.cases, judge=not args.capture_only))
