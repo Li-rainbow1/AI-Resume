@@ -1,6 +1,6 @@
 import csv
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,10 @@ def write_reports(
     config_summary: dict[str, Any],
     group_fields: tuple[str, ...] = ("question_type", "category", "topic"),
 ) -> tuple[Path, Path, Path]:
+    # 显式配置只允许本轮启用的指标进入明细、汇总和CSV；历史文件不回写。
+    if "active_judge_metrics" in config_summary:
+        active = set(config_summary["active_judge_metrics"])
+        results = [replace(result, deepeval_metrics={key: value for key, value in result.deepeval_metrics.items() if key in active}) for result in results]
     report_root.mkdir(parents=True, exist_ok=True)
     jsonl_path = report_root / "case-results.jsonl"
     csv_path = report_root / "case-summary.csv"
@@ -103,6 +107,8 @@ def write_reports(
         "not_applicable_count": sum(result.evaluation_status == "not_applicable" for result in results),
         "evaluated_count": sum(result.evaluation_status != "not_applicable" for result in results),
         "aggregate": aggregate,
+        "zero_returned_count": sum(r.evidence_matches.get("status") == "evaluated" and r.evidence_matches.get("returned_count") == 0 for r in results),
+        "zero_returned_case_ids": [r.case_id for r in results if r.evidence_matches.get("status") == "evaluated" and r.evidence_matches.get("returned_count") == 0],
         "aggregate_evaluated_count": aggregate_evaluated_count,
         "deepeval_aggregate": deepeval_aggregate,
         "groups": {field: _group_summary(results, field) for field in group_fields},

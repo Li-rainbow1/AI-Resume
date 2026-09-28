@@ -58,7 +58,11 @@ def judge_config_summary(config: JudgeConfig | None = None) -> dict[str, Any]:
 
 
 def metric_keys_for(case: EvalCase, metric_keys: tuple[str, ...] | None = None) -> tuple[str, ...]:
-    return tuple(metric_keys or case.judge_metrics or DEFAULT_METRIC_KEYS)
+    if metric_keys is not None:
+        return tuple(metric_keys)
+    if case.chunk_snapshot_version:
+        return ()
+    return tuple(case.judge_metrics or DEFAULT_METRIC_KEYS)
 
 
 def evaluate_with_deepeval(
@@ -66,6 +70,9 @@ def evaluate_with_deepeval(
     result: CaseResult,
     metric_keys: tuple[str, ...] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    keys = metric_keys_for(case, metric_keys)
+    if not keys:
+        return {}
     from deepeval.metrics import (
         AnswerRelevancyMetric,
         ContextualRecallMetric,

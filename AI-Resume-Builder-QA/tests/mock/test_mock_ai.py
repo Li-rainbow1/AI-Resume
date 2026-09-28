@@ -61,7 +61,7 @@ async def test_vision_returns_structured_ocr(mock_client: httpx.AsyncClient) -> 
     content = response.json()["choices"][0]["message"]["content"]
     result = json.loads(content)
     assert result["classification"] == "text"
-    assert "QA_VISION_MARKER" in result["ocrText"]
+    assert result["ocrText"] == "测试-图片-样例 Mock 图片文字"
 
 
 @pytest.mark.mock_ai

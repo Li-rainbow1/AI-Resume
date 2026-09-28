@@ -1,24 +1,29 @@
+import json
+import hashlib
 import logging
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
 
-from app.domain.services.rag_source_filter import filter_sources_by_similarity
 from app.domain.services.rag_project_scope import RagProjectScopeError
+from app.domain.services.rag_source_filter import source_dedup_key
 from app.application.ports.agent_runtime_port import AgentRuntimePort
 from app.application.ports.llm_port import ChatClientPort
+from app.application.ports.reranker_port import RerankerPort
 from app.domain.policies.interview_prompt_policy import (
     build_candidate_mode_system_prompt,
     build_interviewer_mode_system_prompt,
 )
 from app.domain.services.interview_context_service import (
-    InterviewContextBudget, compress_context, model_message, resume_sections,
+    InterviewContextBudget, compress_context, model_context_length, model_message, resume_sections,
 )
 from app.domain.services.rag_retrieval_service import RagRetrieverService
+from app.domain.services.interview_query_service import organize_query, validate_query_scope
 from app.shared.constants.rag import (
+    DEFAULT_RAG_INTERVIEW_CANDIDATE_TOP_K,
     DEFAULT_RAG_INTERVIEW_TOP_K,
-    DEFAULT_RAG_SIMILARITY_THRESHOLD,
+    DEFAULT_RAG_INTERVIEW_RERANK_THRESHOLD,
     DEFAULT_RAG_TIMEOUT_SECONDS,
 )
 
@@ -40,19 +45,28 @@ class InterviewGraph:
         llm_client: ChatClientPort,
         rag_retriever: RagRetrieverService,
         autogen_runtime: AgentRuntimePort,
+        reranker: RerankerPort | None = None,
         rag_top_k: int = DEFAULT_RAG_INTERVIEW_TOP_K,
-        rag_similarity_threshold: float = DEFAULT_RAG_SIMILARITY_THRESHOLD,
+        rag_similarity_threshold: float = 0.0,
+        rag_rerank_threshold: float = DEFAULT_RAG_INTERVIEW_RERANK_THRESHOLD,
         rag_timeout_seconds: float = DEFAULT_RAG_TIMEOUT_SECONDS,
         context_budget: InterviewContextBudget | None = None,
+        capture_context: bool = False,
     ) -> None:
         self.context_budget = context_budget or InterviewContextBudget()
+        self.capture_context = capture_context
         self.llm_client = llm_client
         self.rag_retriever = rag_retriever
         self.autogen_runtime = autogen_runtime
-        # 面试上下文需要比普通知识库问答更聚焦，配置和最终拼接统一最多 4 段。
+        self.reranker = reranker
+        # 面试先取 15 个向量候选，重排后最多注入 4 段。
+        self.rag_candidate_top_k = DEFAULT_RAG_INTERVIEW_CANDIDATE_TOP_K
         self.rag_top_k = min(DEFAULT_RAG_INTERVIEW_TOP_K, max(1, int(rag_top_k or DEFAULT_RAG_INTERVIEW_TOP_K)))
-        self.rag_similarity_threshold = self._normalize_similarity_threshold(rag_similarity_threshold)
+        # 保留旧参数以兼容已有容器调用；面试链路不再使用向量相似度阈值。
+        _ = rag_similarity_threshold
+        self.rag_rerank_threshold = self._normalize_rerank_threshold(rag_rerank_threshold)
         self.rag_timeout_seconds = max(0.2, float(rag_timeout_seconds or 3.0))
+
     def _normalize_mode(self, raw_mode: Any) -> str:
         return "interviewer" if str(raw_mode or "").strip().lower() == "interviewer" else "candidate"
 
@@ -79,22 +93,36 @@ class InterviewGraph:
             "resumeSnapshot": payload.get("resumeSnapshot") or {},
             "summaryThroughSeq": int(payload.get("summaryThroughSeq") or 0),
             "contextVersion": int(payload.get("contextVersion") or 0),
+            "phase": self._normalize_phase(payload.get("phase"), "opening"),
         }
 
     def _prepare_state(self, state: dict[str, Any]) -> dict[str, Any]:
         safe_mode = self._normalize_mode(state.get("mode"))
         safe_command = self._normalize_command(state.get("command"))
-        question = self._build_retrieval_query({**state, "mode": safe_mode, "command": safe_command})
+        state = {**state, "mode": safe_mode, "command": safe_command}
         if safe_command == "finish":
             return {
                 **state,
                 "mode": safe_mode,
                 "command": safe_command,
-                "question": question,
+                "question": "",
                 "ragAnswer": "",
                 "ragSources": [],
                 "ragError": "",
             }
+        # 整理问题与范围校验先于检索；指代不清时只返回澄清，不查询全库或生成评分。
+        if safe_command == "start" and not str(state.get("userInput") or "").strip():
+            question = self._build_retrieval_query(state)
+            trace = {"originalInput": "", "query": question, "type": "opening",
+                     "clarification": "", "elapsedMs": 0}
+        else:
+            trace, query_context = organize_query(state, self.llm_client, self.context_budget.hard)
+            question = trace["query"]
+            if trace["type"] != "clarify":
+                validate_query_scope(trace, query_context, self.rag_retriever.list_scope_catalog())
+        state = {**state, "retrievalQuery": trace}
+        if trace["type"] == "clarify":
+            return {**state, "question": "", "ragAnswer": "", "ragSources": [], "ragError": ""}
         # 面试轮次准备阶段职责：
         # 1) 统一规范 mode/command/query，避免后续链路使用原始脏输入。
         # 2) 在这里完成一次向量检索并把可用上下文放入状态，确保后续 LLM
@@ -102,10 +130,12 @@ class InterviewGraph:
         # 3) 检索失败不抛出到主链路，而是记录 ragError 作为可观察诊断信息。
         rag_answer, rag_sources, rag_error = self._safe_query_rag(
             query=question,
-            top_k=self.rag_top_k,
-            scope_query=str(state.get("userInput") or question),
+            top_k=self.rag_candidate_top_k,
+            scope_query=question,
         )
-        filtered_sources = self._filter_sources_by_similarity(rag_sources)
+        reranked_sources, rerank_error = self._rerank_sources(question, rag_sources)
+        filtered_sources = self._select_reranked_sources(reranked_sources)
+        combined_error = rag_error or rerank_error
         rag_answer = self.rag_retriever.build_answer_from_sources(
             filtered_sources,
             max_sources=self.rag_top_k,
@@ -117,7 +147,7 @@ class InterviewGraph:
             rag_sources=rag_sources,
             filtered_sources=filtered_sources,
             rag_answer=rag_answer,
-            rag_error=rag_error,
+            rag_error=combined_error,
         )
 
         return {
@@ -127,17 +157,34 @@ class InterviewGraph:
             "question": question,
             "ragAnswer": rag_answer,
             "ragSources": filtered_sources,
-            "ragError": rag_error or "",
+            "ragError": combined_error or "",
         }
 
     def prepare_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare_state(self._build_initial_state(payload))
 
     def stream_turn_reply(self, state: dict[str, Any]) -> Iterator[str]:
+        if (state.get("retrievalQuery") or {}).get("type") == "clarify":
+            if self.capture_context:
+                state["generationInput"] = {"schemaVersion": 1, "modelCalled": False}
+            return iter([self._clarification_response(state)])
+        message, system_prompt = self._generation_messages(state)
         return self.llm_client.stream_chat(
-            message=self._build_compact_llm_message(state),
-            system_prompt=self._build_system_prompt(state),
+            message=message,
+            system_prompt=system_prompt,
         )
+
+    def _generation_messages(self, state: dict[str, Any]) -> tuple[str, str]:
+        # 在最终发送位置捕获同一份字符串，避免评测侧重建时遗漏压缩或其他上下文变化。
+        # 开关仅由 QA 配置注入，快照不写日志；原始业务输入仍按原方式发送。
+        message = self._build_compact_llm_message(state)
+        system_prompt = self._build_system_prompt(state)
+        if self.capture_context:
+            messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": message}]
+            serialized = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            state["generationInput"] = {"schemaVersion": 1, "modelCalled": True, "messages": messages,
+                                         "sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest()}
+        return message, system_prompt
 
     def finalize_stream_turn(
         self,
@@ -157,50 +204,16 @@ class InterviewGraph:
         )
 
     def _build_retrieval_query(self, state: dict[str, Any]) -> str:
-        command = self._normalize_command(state.get("command"))
-        user_input = self._truncate_text(state.get("userInput"), 240)
-        memory_summary = self._truncate_text(state.get("memorySummary"), 160)
-        resume_snapshot = state.get("resumeSnapshot") if isinstance(state.get("resumeSnapshot"), dict) else {}
-        latest_assistant_focus = self._build_latest_assistant_focus(state)
-        resume_keywords = self._build_resume_keyword_digest(resume_snapshot, user_input + "\n" + latest_assistant_focus)
-
-        # 用户输入承载本轮检索意图，不再拼入模式、命令和通用目标，减少流程文字干扰。
-        # 无输入时保留检索目标，确保空简历、无历史的开场也有查询内容。
-        # 对话和记忆继续保留，简历仅在无输入时参与检索；问答模型仍接收原有简历上下文。
-        sections: list[str] = []
-        if not user_input:
-            if command == "start":
-                lead = "检索最适合开场自我介绍和首轮提问的项目亮点、岗位关键词与代表性经历。"
-            elif command == "finish":
-                lead = "检索模拟面试总结与改进建议。"
-            else:
-                lead = "检索下一轮模拟面试最相关的上下文。"
-            sections.append(f"检索目标：{lead}")
-        if latest_assistant_focus:
-            sections.append(f"上一轮 AI 关注点：{latest_assistant_focus}")
+        # 空输入开场沿用简历线索；正常对话由问题整理服务处理，历史不直接拼入检索。
+        user_input = str(state.get("userInput") or "").strip()
         if user_input:
-            sections.append(f"当前用户输入：{user_input}")
-        if memory_summary:
-            sections.append(f"记忆摘要：{memory_summary}")
-        if not user_input and resume_keywords:
+            return user_input
+        resume_snapshot = state.get("resumeSnapshot") if isinstance(state.get("resumeSnapshot"), dict) else {}
+        resume_keywords = self._build_resume_keyword_digest(resume_snapshot)
+        sections = ["检索目标：检索最适合开场自我介绍和首轮提问的项目亮点、岗位关键词与代表性经历。"]
+        if resume_keywords:
             sections.append(f"简历关键词：{resume_keywords}")
-
         return "\n".join(sections)
-
-    def _build_latest_assistant_focus(self, state: dict[str, Any]) -> str:
-        history = state.get("history")
-        if not isinstance(history, list):
-            return ""
-        for item in reversed(history):
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role") or "").strip().lower()
-            if role != "assistant":
-                continue
-            content = self._truncate_text(item.get("content"), 180)
-            if content:
-                return content
-        return ""
 
     def _build_resume_keyword_digest(self, resume_snapshot: dict[str, Any], focus: str = "") -> str:
         # 所有经历参与相关性排序；查询摘要逐行选取，避免只留下 HTML 或开头简介。
@@ -232,6 +245,9 @@ class InterviewGraph:
         return self._default_mode_system_prompt(mode, resume_snapshot)
 
     def compact_context(self, state: dict[str, Any]) -> dict[str, Any]:
+        # 澄清没有回答模型输入，直接保留现有摘要，避免额外调用摘要模型。
+        if (state.get("retrievalQuery") or {}).get("type") == "clarify":
+            return state
         return compress_context(state, self.context_budget, self.llm_client, self._build_system_prompt(state))
 
     def _truncate_text(self, value: Any, max_len: int) -> str:
@@ -242,7 +258,7 @@ class InterviewGraph:
 
     def _build_compact_llm_message(self, state: dict[str, Any]) -> str:
         message = model_message(state)
-        if len(message) + len(self._build_system_prompt(state)) > self.context_budget.hard:
+        if model_context_length(state, self._build_system_prompt(state)) > self.context_budget.hard:
             raise ValueError("面试上下文超过字符上限，本轮未生成")
         return message
 
@@ -267,18 +283,71 @@ class InterviewGraph:
         except Exception as exc:
             return "", [], f"RAG query failed: {exc}"
 
-    def _normalize_similarity_threshold(self, raw_value: Any) -> float:
+    def _normalize_rerank_threshold(self, raw_value: Any) -> float:
         try:
             threshold = float(raw_value)
         except (TypeError, ValueError):
-            return DEFAULT_RAG_SIMILARITY_THRESHOLD
+            return DEFAULT_RAG_INTERVIEW_RERANK_THRESHOLD
         return max(0.0, min(1.0, threshold))
 
-    def _filter_sources_by_similarity(self, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # 与普通检索共用过滤规则，保留面试当前阈值、上限和首位兜底行为。
-        return filter_sources_by_similarity(
-            sources, threshold=self.rag_similarity_threshold, top_k=self.rag_top_k,
+    def _rerank_sources(
+        self,
+        query: str,
+        sources: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        if not sources:
+            return [], None
+        if self.reranker is None:
+            return [], "RAG reranker is not configured"
+        try:
+            return list(self.reranker.rerank(query, sources) or []), None
+        except Exception as exc:
+            return [], f"RAG rerank failed: {exc}"
+
+    def _select_reranked_sources(self, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # 只按重排分排序并做严格 0.6 筛选；不读取向量 similarity，
+        # 也不保留旧的首条 0.12 兜底。
+        def sort_key(item: dict[str, Any]) -> float:
+            score = self._safe_rerank_score(item)
+            return score if score is not None else float("-inf")
+
+        ranked_sources = sorted(
+            (item for item in sources if isinstance(item, dict)),
+            key=sort_key,
+            reverse=True,
         )
+        selected: list[dict[str, Any]] = []
+        seen_signatures: set[str] = set()
+        for item in ranked_sources:
+            rerank_score = self._safe_rerank_score(item)
+            if rerank_score is None:
+                continue
+            if rerank_score < self.rag_rerank_threshold:
+                continue
+            signature = source_dedup_key(item)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            copied = dict(item)
+            metadata = item.get("metadata")
+            copied["metadata"] = {
+                **(metadata if isinstance(metadata, dict) else {}),
+                "sourceNumber": len(selected) + 1,
+                "rerankScore": rerank_score,
+                "rerankRank": item.get("rerank_rank"),
+            }
+            selected.append(copied)
+            if len(selected) >= self.rag_top_k:
+                break
+        return selected
+
+    @staticmethod
+    def _safe_rerank_score(item: dict[str, Any]) -> float | None:
+        try:
+            score = float(item.get("rerank_score"))
+        except (TypeError, ValueError):
+            return None
+        return score if score == score else None
 
     def _log_interview_rag(
         self,
@@ -292,18 +361,31 @@ class InterviewGraph:
         rag_error: str | None,
     ) -> None:
         # 仅记录长度与数量，避免在诊断日志中泄露简历和知识库正文。
-        _LOGGER.info("[AI面试] 检索 queryChars=%s sourceCount=%s answerChars=%s failed=%s",
-                     len(query), len(filtered_sources), len(rag_answer), bool(rag_error))
+        _LOGGER.info(
+            "[AI面试] 检索 queryChars=%s candidateCount=%s sourceCount=%s answerChars=%s failed=%s",
+            len(query), len(rag_sources), len(filtered_sources), len(rag_answer), bool(rag_error),
+        )
 
     def _safe_chat(self, state: dict[str, Any]) -> tuple[str, str | None]:
+        if (state.get("retrievalQuery") or {}).get("type") == "clarify":
+            if self.capture_context:
+                state["generationInput"] = {"schemaVersion": 1, "modelCalled": False}
+            return self._clarification_response(state), None
         try:
+            message, system_prompt = self._generation_messages(state)
             reply = self.llm_client.chat(
-                message=self._build_compact_llm_message(state),
-                system_prompt=self._build_system_prompt(state),
+                message=message,
+                system_prompt=system_prompt,
             )
             return str(reply or "").strip(), None
         except Exception as exc:
             return "", f"LLM chat failed: {exc}"
+
+    def _clarification_response(self, state: dict[str, Any]) -> str:
+        # 澄清直接使用校验后的问题，复用原响应协议，避免第二次生成改成猜测或评分。
+        return json.dumps({"assistantReply": state["retrievalQuery"]["clarification"],
+                           "phase": self._normalize_phase(state.get("phase"), "opening"), "nextAction": "continue",
+                           "turnScore": None, "finalEvaluation": None}, ensure_ascii=False)
 
     def _normalize_phase(self, raw_phase: Any, default: str) -> str:
         phase = str(raw_phase or "").strip().lower()
@@ -422,6 +504,8 @@ class InterviewGraph:
         if llm_error or graph_error:
             raise RuntimeError("面试生成未完成，请重试")
         next_state = {**state, **self._parse_model_response(raw_text, state)}
+        if (state.get("retrievalQuery") or {}).get("type") == "clarify":
+            return next_state
         if llm_error:
             next_state["llmError"] = llm_error
         if graph_error:
@@ -448,6 +532,8 @@ class InterviewGraph:
             "contextVersion": int(final_state.get("contextVersion") or 0),
             "summaryThroughSeq": int(final_state.get("summaryThroughSeq") or 0),
             "meta": {
+                **({"generationInput": final_state["generationInput"]} if "generationInput" in final_state else {}),
+                "retrievalQuery": final_state.get("retrievalQuery"),
                 "ragError": str(final_state.get("ragError") or "").strip(),
                 "llmError": str(final_state.get("llmError") or "").strip(),
                 "graphError": str(final_state.get("graphError") or "").strip(),

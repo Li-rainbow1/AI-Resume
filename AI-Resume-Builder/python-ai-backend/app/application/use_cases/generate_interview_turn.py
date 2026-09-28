@@ -20,6 +20,21 @@ from app.bootstrap.container import build_interview_graph, build_interview_sessi
 _LOGGER = logging.getLogger("uvicorn.error")
 
 
+def _exception_diagnostics(error: BaseException) -> list[dict]:
+    """只记录类型和错误码，避免上游异常正文包含凭证或请求内容。"""
+    details, seen = [], set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        item = {"type": type(error).__name__}
+        for name in ("errno", "code"):
+            value = getattr(error, name, None)
+            if isinstance(value, int):
+                item[name] = value
+        details.append(item)
+        error = error.__cause__ or error.__context__
+    return details
+
+
 def _build_accepted_status_message(command: str) -> str:
     safe_command = str(command or "").strip().lower()
     if safe_command == "start":
@@ -74,6 +89,8 @@ def _prepare_request_payload(
     request_id = str(payload.get('requestId') or '').strip()
     cached_request_id = str(stored_session.get('lastRequestId') or '').strip()
     cached_response = stored_session.get('lastResponse')
+    if isinstance(cached_response, dict):
+        payload['phase'] = cached_response.get('phase') or 'opening'
     if request_id and request_id == cached_request_id and isinstance(cached_response, dict):
         payload['_cachedResponse'] = cached_response
         return payload
@@ -154,10 +171,17 @@ def generate_interview_turn_stream(request: InterviewTurnRequestDto) -> Iterator
     # 如果这一层失败，说明还没有进入模型生成阶段，必须立刻回 error，
     # 避免前端一直停留在“准备中”却收不到后续事件。
     try:
+        if (request_payload.get('command') != 'finish'
+            and (request_payload.get('history') or request_payload.get('memorySummary'))
+            and not (request_payload.get('command') == 'start' and not str(request_payload.get('userInput') or '').strip())):
+            yield to_interview_processing_event('正在结合对话整理检索问题')
         prepared_state = graph.prepare_turn(request_payload)
         # 超阈值时才调用摘要模型；完成后先保存覆盖位置，再开始本轮回复。
-        from app.domain.services.interview_context_service import model_message
-        if len(graph._build_system_prompt(prepared_state)) + len(model_message(prepared_state)) > graph.context_budget.soft:
+        from app.domain.services.interview_context_service import model_context_length
+        if (prepared_state.get('retrievalQuery') or {}).get('type') != 'clarify' and model_context_length(
+            prepared_state,
+            graph._build_system_prompt(prepared_state),
+        ) > graph.context_budget.soft:
             yield to_interview_processing_event('正在整理较早的面试记录')
         compacted = graph.compact_context(prepared_state)
         if compacted['summaryThroughSeq'] != prepared_state['summaryThroughSeq']:
@@ -222,10 +246,11 @@ def generate_interview_turn_stream(request: InterviewTurnRequestDto) -> Iterator
     except Exception as exc:
         llm_error = '模型流式生成未完成，请重试'
         _LOGGER.warning(
-            "[AI面试][流式] stream exception sessionId=%s chunkCount=%s error=%s",
+            "[AI面试][流式] stream exception sessionId=%s chunkCount=%s error=%s diagnostics=%s",
             prepared_state.get("sessionId"),
             stream_chunk_count,
             llm_error,
+            _exception_diagnostics(exc),
         )
 
     stream_elapsed_ms = int((time.monotonic() - stream_started_at) * 1000)

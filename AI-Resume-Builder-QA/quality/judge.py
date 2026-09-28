@@ -46,7 +46,10 @@ JUDGE_RESPONSE_FORMAT = "json_object"
 JUDGE_SDK_MAX_RETRIES = 0
 
 # 思考参数：智谱原生端点的写法，**恒开思考**。整组就是 `extra_body`，不再有第二种风格。
-JUDGE_EXTRA_BODY: dict[str, Any] = {"thinking": {"type": "enabled"}}
+JUDGE_EXTRA_BODY: dict[str, Any] = {
+    "thinking": {"type": "enabled"},
+    "reasoning_effort": "low",
+}
 
 # 传输层重试的退避间隔（秒）。次数不另设旋钮：与既有的 `max_attempts` 同一个口径。
 JUDGE_TRANSPORT_BACKOFF_SECONDS = 2.0

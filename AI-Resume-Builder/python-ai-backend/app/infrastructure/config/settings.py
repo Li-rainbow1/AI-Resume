@@ -109,7 +109,12 @@ class Settings:
     app_interview_context_soft_chars: int
     app_interview_context_hard_chars: int
     app_interview_summary_chars: int
+    app_interview_capture_context: bool
     app_interview_rag_timeout_seconds: float
+    rag_rerank_api_key: str
+    rag_rerank_model: str
+    rag_rerank_endpoint: str
+    rag_rerank_timeout_seconds: float
     embedding_provider: str
     embedding_model_name: str
     embedding_base_url: str
@@ -264,10 +269,22 @@ def get_settings() -> Settings:
         app_interview_context_soft_chars=_get_int("APP_INTERVIEW_CONTEXT_SOFT_CHARS", 24000),
         app_interview_context_hard_chars=_get_int("APP_INTERVIEW_CONTEXT_HARD_CHARS", 32000),
         app_interview_summary_chars=_get_int("APP_INTERVIEW_SUMMARY_CHARS", 3000),
+        app_interview_capture_context=(os.getenv("APP_ENV", "").lower() == "qa"
+                                       and os.getenv("APP_INTERVIEW_CAPTURE_CONTEXT", "").lower() == "true"),
         app_interview_rag_timeout_seconds=max(
             0.2,
             _get_float("APP_INTERVIEW_RAG_TIMEOUT_SECONDS", DEFAULT_RAG_TIMEOUT_SECONDS),
         ),
+        rag_rerank_api_key=_get_first_non_empty("RERANK_API_KEY", "DASHSCOPE_API_KEY"),
+        rag_rerank_model=(os.getenv("RERANK_MODEL", "qwen3.7-text-rerank") or "qwen3.7-text-rerank").strip(),
+        rag_rerank_endpoint=(
+            os.getenv(
+                "RERANK_ENDPOINT",
+                "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank",
+            )
+            or "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+        ).strip(),
+        rag_rerank_timeout_seconds=max(3.0, _get_float("RERANK_TIMEOUT_SECONDS", 120.0)),
         embedding_provider=embedding_provider,
         embedding_model_name=embedding_model_name,
         embedding_base_url=embedding_base_url,

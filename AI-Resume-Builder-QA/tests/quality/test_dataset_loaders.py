@@ -1,11 +1,4 @@
-"""数据集加载与 schema 分发的契约测试。
-
-三件事各自钉住：
-1. `evidence-v3`（旧集）仍然可加载、可评分——旧数据集文件已不在本机，所以这里
-   现场造一个最小同构数据集，避免「旧集可跑」只是口头承诺。
-2. `interview-notes-v1`（面试八股集）按多文档 + 答案单元 + 语义判分加载。
-3. 标注与语料出问题时必须在加载阶段就报错，不能带着错标注去评分。
-"""
+"""当前数据集加载、版本校验及语料完整性的契约测试。"""
 
 import hashlib
 import json
@@ -21,10 +14,8 @@ from quality.loaders import (
     supported_schemas,
     verify_corpus,
 )
-from quality.metrics import evaluate_case
 from quality.models import (
     IMAGE_KIND,
-    LEGACY_SCHEMA_VERSION,
     TEXT_KIND,
     CorpusAsset,
     SourceSelector,
@@ -47,63 +38,6 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8"
     )
-
-
-def _legacy_case(case_id: str, question_type: str, answer: str, location: list[dict]) -> dict:
-    return {
-        "case_id": case_id,
-        "question": f"{case_id} 的问题",
-        "reference_answer": answer,
-        "expected_document": "quality-corpus.md",
-        "expected_source_location": location,
-        "expected_facts": [answer],
-        "forbidden_facts": [],
-        "question_type": question_type,
-        "top_k": 4,
-    }
-
-
-def write_legacy_dataset(root: Path) -> Path:
-    """造一个最小的 evidence-v3 数据集，结构与已灭失的 golden_dataset.jsonl 同构。"""
-    corpus = root / "corpus"
-    (corpus / "assets").mkdir(parents=True)
-    document = corpus / "quality-corpus.md"
-    document.write_text("受理 -> 审核 -> 批准\n访问码 LIME-482\n", encoding="utf-8")
-    badge = corpus / "assets" / "quality-ocr-badge.png"
-    badge.write_bytes(b"fake-png-bytes")
-
-    text_case = _legacy_case("TXT-001", "text", "LIME-482", [{"ingestSource": "text_document"}])
-    image_case = _legacy_case("IMG-001", "image_ocr", "LIME-482",
-                              [{"imageLocator": "quality-ocr-badge.png"}])
-    # 无答案题不得声明来源位置，否则加载器会判定「无答案题被算作通过」。
-    no_answer = _legacy_case("NA-001", "no_answer", "未提供", [])
-    cases_path = root / "golden_dataset.jsonl"
-    _write_jsonl(cases_path, [text_case, image_case, no_answer])
-    _write_json(
-        root / "evidence_annotations.json",
-        {
-            "corpus_manifest": [
-                {"path": "corpus/quality-corpus.md", "sha256": _sha256(document)},
-                {"path": "corpus/assets/quality-ocr-badge.png", "sha256": _sha256(badge)},
-            ],
-            "evidence_units": {
-                "T-1": {"kind": "text", "match_patterns": [["lime-482"]]},
-                "I-1": {"kind": "image", "asset": "assets/quality-ocr-badge.png",
-                        "match_patterns": [["lime-482"]]},
-            },
-            "retrieval_cases": [
-                {**text_case, "required_evidence": ["T-1"], "count_as_pass": True,
-                 "include_in_retrieval_aggregate": True},
-                {**image_case, "required_evidence": ["I-1"], "count_as_pass": True,
-                 "include_in_retrieval_aggregate": True},
-            ],
-            "no_answer_cases": [
-                {**no_answer, "required_evidence": [], "count_as_pass": False,
-                 "include_in_retrieval_aggregate": False},
-            ],
-        },
-    )
-    return cases_path
 
 
 def write_notes_dataset(root: Path, *, mutate: dict | None = None) -> Path:
@@ -196,16 +130,8 @@ def write_notes_dataset(root: Path, *, mutate: dict | None = None) -> Path:
 # --------------------------------------------------------------------------- #
 
 
-def test_schema_registry_covers_both_generations() -> None:
-    assert set(supported_schemas()) >= {LEGACY_SCHEMA_VERSION, NOTES_SCHEMA}
-
-
-def test_detect_schema_version_falls_back_to_legacy(tmp_path: Path) -> None:
-    cases_path = write_legacy_dataset(tmp_path)
-    assert detect_schema_version(cases_path) == LEGACY_SCHEMA_VERSION
-    # 注释行与空行不参与判定。
-    cases_path.write_text("# 注释\n\n" + cases_path.read_text(encoding="utf-8"), encoding="utf-8")
-    assert detect_schema_version(cases_path) == LEGACY_SCHEMA_VERSION
+def test_schema_registry_covers_current_datasets() -> None:
+    assert set(supported_schemas()) == {NOTES_SCHEMA, "interview-formal-v1"}
 
 
 def test_unknown_schema_is_rejected_instead_of_guessed(tmp_path: Path) -> None:
@@ -228,65 +154,26 @@ def test_split_resolution_reports_choices(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 旧集（evidence-v3）仍可跑
+# 语料完整性
 # --------------------------------------------------------------------------- #
 
 
-def test_legacy_dataset_still_loads_and_scores(tmp_path: Path) -> None:
-    cases_path = write_legacy_dataset(tmp_path)
-    case_set = load_case_set(cases_path)
-    assert case_set.schema_version == LEGACY_SCHEMA_VERSION
-    assert [case.case_id for case in case_set.cases] == ["TXT-001", "IMG-001", "NA-001"]
-    assert len(case_set.assets) == 2
-
-    text_case, image_case, no_answer = case_set.cases
-    # 旧集每个正则组变成一个必须命中的子项，全部命中也只算一个答案单元。
-    assert [unit.required_parts for unit in text_case.units] == [1]
-    assert text_case.units[0].patterns == (("lime-482",),)
-    assert text_case.units[0].selectors == (
-        SourceSelector(document="quality-corpus.md", kind=TEXT_KIND, locator=None),
-    )
-    assert image_case.units[0].selectors == (
-        SourceSelector(document="quality-corpus.md", kind=IMAGE_KIND,
-                       locator="assets/quality-ocr-badge.png"),
-    )
-    assert no_answer.answerable is False and no_answer.units == ()
-    # 旧集只测检索侧两项，回答侧两项当时没有可比口径。
-    assert text_case.judge_metrics == ("contextual_recall", "contextual_relevancy")
-
-    source = {"content": "访问码 LIME-482", "metadata": {
-        "originalFilename": "qa-rag-run-x-quality-corpus.md", "ingestSource": "text_document"}}
-    assert evaluate_case(text_case, "", [source]) == {
-        "recall_at_k": 1.0, "precision_at_returned": 1.0, "mrr": 1.0,
-    }
-
-
 def test_corpus_drift_is_rejected(tmp_path: Path) -> None:
-    cases_path = write_legacy_dataset(tmp_path)
-    (tmp_path / "corpus" / "quality-corpus.md").write_text("被改过的正文", encoding="utf-8")
+    cases_path = write_notes_dataset(tmp_path)
+    (tmp_path / "corpus" / "1-笔记.md").write_text("被改过的正文", encoding="utf-8")
     with pytest.raises(ValueError, match="语料已变化"):
         load_case_set(cases_path)
 
 
 def test_corpus_path_must_stay_inside_dataset(tmp_path: Path) -> None:
-    write_legacy_dataset(tmp_path)
+    write_notes_dataset(tmp_path)
     with pytest.raises(ValueError, match="路径越界"):
         verify_corpus(tmp_path, [CorpusAsset(relative_path="../outside.md", sha256="0" * 64)])
 
 
-def test_grading_annotations_must_match_question_file(tmp_path: Path) -> None:
-    cases_path = write_legacy_dataset(tmp_path)
-    annotations_path = tmp_path / "evidence_annotations.json"
-    annotations = json.loads(annotations_path.read_text(encoding="utf-8"))
-    annotations["evidence_units"]["T-1"]["match_patterns"] = []
-    _write_json(annotations_path, annotations)
-    with pytest.raises(ValueError, match="缺少匹配规则"):
-        load_case_set(cases_path)
-
-
 def test_missing_corpus_file_is_reported(tmp_path: Path) -> None:
-    cases_path = write_legacy_dataset(tmp_path)
-    (tmp_path / "corpus" / "assets" / "quality-ocr-badge.png").unlink()
+    cases_path = write_notes_dataset(tmp_path)
+    (tmp_path / "corpus" / "附件" / "a.png").unlink()
     with pytest.raises(ValueError, match="语料文件缺失"):
         load_case_set(cases_path)
 
@@ -302,9 +189,6 @@ def test_notes_dataset_loads_units_and_selectors(tmp_path: Path) -> None:
     assert case_set.schema_version == NOTES_SCHEMA
     answerable, no_answer = case_set.cases
     assert [unit.unit_id for unit in answerable.units] == ["INTN-F-001-U01", "INTN-F-001-U02"]
-    # 语义单元没有正则，判分只能交给语义判分器。
-    assert all(unit.uses_semantics for unit in answerable.units)
-    assert all(unit.required_parts == 1 for unit in answerable.units)
     assert answerable.units[1].selectors[0].kind == IMAGE_KIND
     assert answerable.units[1].selectors[0].locator == "corpus/附件/a.png"
     # 本集只测检索侧：接口 /api/ai/rag/query 不生成回答（返回的 answer 是检索片段拼成的
@@ -381,3 +265,13 @@ def test_real_interview_notes_dataset_matches_its_validation_report() -> None:
     # 正式集 45 道有答案题参与聚合，无答案 5 题单列。
     assert sum(case.answerable for case in case_set.cases) == 45
     assert sum(case.include_in_answer_aggregate for case in case_set.cases) == 45
+
+
+def test_removed_schema_and_missing_version_are_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "cases.jsonl"
+    _write_jsonl(path, [{"schema_version": "evidence-v3", "case_id": "OLD-1"}])
+    with pytest.raises(ValueError, match="没有注册"):
+        load_case_set(path)
+    _write_jsonl(path, [{"case_id": "MISSING-VERSION"}])
+    with pytest.raises(ValueError, match="缺少 schema_version"):
+        load_case_set(path)

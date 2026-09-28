@@ -128,7 +128,7 @@ async def chat_completions(
         json.dumps(
             {
                 "classification": "text",
-                "ocrText": "QA_VISION_MARKER Mock 图片文字",
+                "ocrText": "测试-图片-样例 Mock 图片文字",
                 "description": "QA 测试图片",
                 "confidence": 0.99,
             },

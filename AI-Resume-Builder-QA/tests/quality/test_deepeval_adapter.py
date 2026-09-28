@@ -11,6 +11,7 @@
 import importlib
 import json
 import os
+from dataclasses import replace
 from collections.abc import Sequence
 from typing import Any
 
@@ -231,6 +232,12 @@ def test_metric_keys_prefers_explicit_then_declared_then_default() -> None:
     assert metric_keys_for(declared, ("faithfulness",)) == ("faithfulness",)
 
 
+def test_fixed_chunk_qrels_disable_deepeval_for_retrieval_metrics() -> None:
+    """固定片段 qrels 已提供检索相关性时，RAG Runner 不再调用 Judge 重复打分。"""
+    case = replace(_case(("contextual_recall",)), chunk_snapshot_version="chunks-v1")
+    assert metric_keys_for(case) == ()
+
+
 def test_judge_config_summary_redacts_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "DEEPEVAL_JUDGE_BASE_URL", "https://user:secret@judge.invalid:8443/v1?k=1#frag"
@@ -246,7 +253,9 @@ def test_judge_config_summary_redacts_credentials(monkeypatch: pytest.MonkeyPatc
     # 通道事实来自共享配方，本层只补指标级开关；报告里必须能看出配置来源。
     assert summary["env_prefix"] == "DEEPEVAL_JUDGE"
     assert summary["response_format"] == "json_object"
-    assert summary["thinking"] == {"thinking": {"type": "enabled"}}
+    assert summary["thinking"] == {
+        "thinking": {"type": "enabled"}, "reasoning_effort": "low"
+    }
     assert summary["sdk_max_retries"] == 0
     assert summary["request_timeout_seconds"] == 60.0
     assert summary["threshold"] == 0.5

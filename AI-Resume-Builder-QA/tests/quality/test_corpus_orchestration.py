@@ -22,6 +22,7 @@
 import hashlib
 import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -31,7 +32,6 @@ from clients.rag import UploadAsset
 from quality.corpus import corpus_for, expected_unreferenced_for, supported_corpus_schemas
 from quality.loaders import CaseSet, load_case_set
 from quality.models import (
-    LEGACY_SCHEMA_VERSION,
     TEXT_KIND,
     AnswerUnit,
     CorpusAsset,
@@ -111,7 +111,7 @@ def test_unregistered_schema_is_rejected_before_upload(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="语料编排尚未接线"):
         corpus_for(case_set, tmp_path, "runx")
     assert NOTES_SCHEMA in supported_corpus_schemas()
-    assert LEGACY_SCHEMA_VERSION in supported_corpus_schemas()
+    assert supported_corpus_schemas() == (NOTES_SCHEMA,)
 
 
 @requires_local_corpus
@@ -124,10 +124,6 @@ def test_unreferenced_attachments_are_declared_not_tolerated() -> None:
     供将来真出现「挂不上的附件」时点名。
     """
     assert expected_unreferenced_for(_notes_case_set()) == ()
-    legacy = CaseSet(
-        schema_version=LEGACY_SCHEMA_VERSION, dataset_dir=DATASET, cases_path=DATASET, cases=()
-    )
-    assert expected_unreferenced_for(legacy) == ()
 
 
 def test_declared_unreferenced_exception_must_exist_in_assets(
@@ -170,7 +166,7 @@ def test_declared_hash_is_enforced(tmp_path: Path) -> None:
 
 
 def _text_case() -> EvalCase:
-    """正则单元：`matcher_for_cases` 会选离线的正则匹配器，整条链路不碰模型。"""
+    """构造答案题；运行器还要求题目带固定检索片段标注。"""
     return EvalCase(
         schema_version=NOTES_SCHEMA,
         case_id="Q-001",
@@ -183,13 +179,29 @@ def _text_case() -> EvalCase:
                 unit_id="u1",
                 claim="范围查询友好",
                 selectors=(SourceSelector(document="1-测试.md", kind=TEXT_KIND),),
-                required_parts=1,
-                patterns=(("范围",),),
             ),
         ),
         expected_documents=("1-测试.md",),
         question_type="single",
     )
+
+
+def _annotated_text_case() -> EvalCase:
+    case = _text_case()
+    content = "范围查询友好"
+    chunk = {
+        "chunk_id": "test-chunk-1",
+        "runtime_chunk_id": "runtime-test-chunk-1",
+        "content": content,
+        "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
+        "document_id": "doc-1",
+        "source_type": "text",
+        "chunk_index": 0,
+        "image_extraction_id": "",
+        "image_chunk_offset": 0,
+    }
+    return replace(case, relevant_chunk_ids=("test-chunk-1",), chunk_snapshot=(chunk,),
+                   chunk_snapshot_version="test-snapshot-v1")
 
 
 def _corpus(*, unreferenced: tuple[str, ...] = ("附件/orphan.png",)) -> QualityCorpus:
@@ -391,7 +403,7 @@ async def _run_corpus_stage(
     corpus: QualityCorpus,
     client: _FakeRagClient,
 ) -> list:
-    """只驱动入库段：加载器与语料工厂都换成桩，判分走离线的正则匹配器。"""
+    """只驱动入库段：加载器与语料工厂用桩，题目带内存中的固定片段 qrels。"""
     (tmp_path / "cases.jsonl").write_text("", encoding="utf-8")
     (tmp_path / "evidence_annotations.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
@@ -400,7 +412,7 @@ async def _run_corpus_stage(
             schema_version=NOTES_SCHEMA,
             dataset_dir=tmp_path,
             cases_path=tmp_path / "cases.jsonl",
-            cases=(_text_case(),),
+            cases=(_annotated_text_case(),),
         ),
     )
     monkeypatch.setattr("quality.runner.corpus_for", lambda *_args, **_kwargs: corpus)

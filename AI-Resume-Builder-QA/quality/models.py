@@ -1,16 +1,4 @@
-"""评测数据的统一结构。
-
-评分只依赖两件事：题目声明的「答案单元」和运行期实际返回的来源。数据集之间
-的差别只有一处——答案单元怎么落到来源上（单文档还是多文档、正则还是语义）。
-所以本模块只描述结构与不变量，不出现任何具体数据集的文件名或字段名；schema
-差异全部下沉到 `quality/loaders.py`。
-
-历史背景：`evidence-v3` 那一代数据集把 `expected_document` 放在题上、把
-`match_patterns` 放在证据上，并且只允许一篇预期文档。跨文档题与语义判分在
-那个形状里表达不出来，所以这里把两代收敛成同一组模型：
-`EvalCase.units[*].selectors` 描述「这条事实可以从哪些来源得到」，
-`AnswerUnit.patterns` 为空表示交给语义判分器。
-"""
+"""评测题目、证据标注与运行结果。RAG 评分使用冻结片段 ID，答案单元用于数据集描述。"""
 
 from __future__ import annotations
 
@@ -23,8 +11,7 @@ if TYPE_CHECKING:
     # 可被离线判分链路导入」。
     from clients.rag import UploadAsset
 
-# 旧集没有 schema_version 字段，用这个值代表「单文档 + 正则判分」的那一代。
-LEGACY_SCHEMA_VERSION = "evidence-v3"
+NOTES_SCHEMA_VERSION = "interview-notes-v1"
 
 ANY_KIND = "any"
 TEXT_KIND = "text"
@@ -46,35 +33,17 @@ class SourceSelector:
 
 @dataclass(frozen=True)
 class AnswerUnit:
-    """必须被覆盖的一个答案事实。
-
-    `required_parts` 是「同时要命中的子项数」：语义判分只有一项，旧正则集等于
-    正则组数。子项允许由不同片段分摊，因此覆盖判定要在片段之间累加，单条片段
-    命中一半不能算覆盖。
-    """
+    """数据集标注的一条答案事实及其可接受证据范围。"""
 
     unit_id: str
     claim: str
     selectors: tuple[SourceSelector, ...] = ()
-    required_parts: int = 1
-    patterns: tuple[tuple[str, ...], ...] = ()
     acceptance: str = ""
-
-    @property
-    def uses_semantics(self) -> bool:
-        """没有正则规则时只能语义判分；不允许退回关键词匹配。"""
-        return not self.patterns
-
-    def __post_init__(self) -> None:
-        if self.required_parts < 1:
-            raise ValueError(f"答案单元至少要有一个子项：{self.unit_id}")
-        if self.patterns and len(self.patterns) != self.required_parts:
-            raise ValueError(f"正则组数与子项数不一致：{self.unit_id}")
 
 
 @dataclass(frozen=True)
 class EvalCase:
-    """一道评测题；两个 schema 加载后都是这个形状。"""
+    """一道评测题。"""
 
     schema_version: str
     case_id: str
@@ -91,14 +60,16 @@ class EvalCase:
     image_requirement: str = "none"
     include_in_retrieval_aggregate: bool = True
     include_in_answer_aggregate: bool = True
-    expected_facts: tuple[str, ...] = ()
     refusal_rubric: dict[str, Any] = field(default_factory=dict)
     notes: str = ""
     # 本题适用哪些 DeepEval 指标；空表示用适配层默认集。**按数据集对应的业务链路声明**：
-    # 检索链路（`/api/ai/rag/query` 不生成回答）的两个集都只声明检索侧两项，回答侧两项
+    # 检索链路（`/api/ai/rag/query` 不生成回答）由固定片段标注评分，回答侧两项
     # 留给面试链路（它在 `interview_runner.py` 里自己点指标）。因此这件事必须由题目声明，
     # 而不是写死在适配层。
     judge_metrics: tuple[str, ...] = ()
+    relevant_chunk_ids: tuple[str, ...] = ()
+    chunk_snapshot: tuple[dict[str, Any], ...] = field(default=(), repr=False, compare=False)
+    chunk_snapshot_version: str = ""
 
     @property
     def unit_ids(self) -> tuple[str, ...]:
@@ -133,8 +104,7 @@ class QualityCorpus:
     `relativePath` 把附件关联到正文，所以附件必须与正文同批、且相对路径要和正文中的
     Markdown 图片引用一致，分两批上传会让图片永远挂不上。
 
-    `noise_assets` 是额外的干扰文档，单独上传是为了便于分别登记与核对数量；旧集需要它
-    来给 Precision@K / MRR 制造区分度，新集的 5 篇正文彼此就是干扰。
+    `noise_assets` 是额外的干扰文档，单独上传是为了便于分别登记与核对数量；当前数据集的正文之间也可互为干扰。
 
     `document_file_names` 是本批次全部正文文件（不含干扰文档），`noise_file_names`
     是干扰文档；两者都要进清理注册表。
@@ -153,7 +123,6 @@ class QualityCorpus:
     @property
     def attachment_assets(self) -> list[UploadAsset]:
         return [asset for asset in self.primary_assets if asset.role == "attachment"]
-
 
 
 @dataclass(frozen=True)

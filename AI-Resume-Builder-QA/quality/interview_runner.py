@@ -27,6 +27,7 @@ from quality.resident_corpus import (
 )
 from quality.runtime_guard import real_model_guard_reason
 from quality.settings import QualitySettings
+from quality.interview_evidence import captured_evidence, audit_answer, metric_details, aggregate_metrics, AuditValidationError
 
 # 面试评测的数据集。它与 RAG 质量评测集不是同一份，各自在自己的目录里冻一份清单；
 # 采集与「原样重评」都必须锚在同一个目录上，否则重评会拿另一份清单去核。
@@ -46,7 +47,7 @@ def error_types(error):
 def shared_judge_sha256():
     """三条链路共用同一份 Judge 实现，指纹也要一起算，不能只算某个入口文件。"""
     digest = hashlib.sha256()
-    for name in ("judge.py", "deepeval_judge.py"):
+    for name in ("judge.py", "deepeval_judge.py", "interview_judge.py", "interview_runner.py", "interview_evidence.py"):
         digest.update(name.encode())
         digest.update(Path(__file__).with_name(name).read_bytes())
     return digest.hexdigest()
@@ -55,6 +56,7 @@ def shared_judge_sha256():
 def runtime_judge_config():
     """Judge 运行时配置：通道事实全部来自 `JudgeConfig`，本函数不再重复硬编码。"""
     return {**judge_config_summary(), "adapter": "shared-json-schema-v1",
+            "evaluation_protocol": "actual-input-v1-separate-refusal-audit",
             "faithfulness_penalize_ambiguous_claims": True,
             "adapter_sha256": shared_judge_sha256()}
 
@@ -63,7 +65,7 @@ def evaluate_reply(question, reply, context):
     """只评真实 assistantReply；参考答案不注入模型依据。"""
     from deepeval.metrics import FaithfulnessMetric, AnswerRelevancyMetric
     from deepeval.test_case import LLMTestCase
-    from quality.interview_judge import InterviewJudge
+    from quality.interview_judge import InterviewJudge, EvidenceFaithfulnessJudge
 
     # 配置只解析一次：Judge 模型与报告摘要必须是同一份配置，
     # 否则报告会记下与实际请求不同的端点。
@@ -72,28 +74,51 @@ def evaluate_reply(question, reply, context):
     model = InterviewJudge(resolved)
     case = LLMTestCase(input=question, actual_output=reply, retrieval_context=context)
     scores = {}
+    try:
+        audit = audit_answer(model, question, reply, context)
+        scores["answer_audit"] = {"status": "completed", **audit}
+    except Exception as exc:
+        audit = None
+        scores["answer_audit"] = {"status": "error", "error_chain": error_types(exc)}
+        if isinstance(exc, AuditValidationError):
+            scores["answer_audit"].update(validation_issues=exc.issues, judge_result=exc.result)
     # Faithfulness 默认把「依据不足（idk）」的陈述也计入得分，判分偏松；
     # 开启 penalize_ambiguous_claims 后无依据的补充会被扣分。
     # Answer Relevancy 无该参数，故按指标分别传参。
     metric_options = {"faithfulness": {"penalize_ambiguous_claims": True}}
+    faithfulness_model = EvidenceFaithfulnessJudge(resolved)
     for name, factory in (("faithfulness", FaithfulnessMetric), ("answer_relevancy", AnswerRelevancyMetric)):
-        values, reasons = [], []
+        values, reasons, runs = [], [], []
+        if name == "faithfulness" and audit is not None and not audit["has_factual_claims"] and audit["response_kind"] in {"refusal", "clarification"}:
+            scores[name] = {"status": "not_applicable", "score": None, "passed": None,
+                            "reason": "无可评事实的纯拒答或澄清", "runs": []}
+            continue
         print("开始评分", name, flush=True)
         for _ in range(config["repeat_count"]):
-            metric = factory(model=model, threshold=config["threshold"], include_reason=True, async_mode=False,
+            metric = factory(model=faithfulness_model if name == "faithfulness" else model, threshold=config["threshold"], include_reason=True, async_mode=False,
                              **metric_options.get(name, {}))
-            metric.measure(case)
+            try:
+                metric.measure(case)
+            except Exception as exc:
+                runs.append({**metric_details(metric), "error_chain": error_types(exc)})
+                scores[name] = {"status": "error", "score": None, "runs": runs}
+                break
+            runs.append(metric_details(metric))
             if metric.score is None:
                 # 与 deepeval_adapter 同一失败口径：把 metric.error 带出来，
                 # 免得「判分器没给分」只留一个看不出原因的裸异常。
-                raise RuntimeError(f"{type(metric).__name__} 未返回分数：{metric.error or '未记录原因'}")
+                scores[name] = {"status": "error", "score": None, "runs": runs, "reason": "未返回分数"}
+                break
             # 09-14 的坑：Judge 返回空 verdict 时 Faithfulness 兜底记满分——那不是
             # 「答得忠实」，是「根本没判」。必须拦下，不能让这种轮次混进均值。
-            if name == "faithfulness" and getattr(metric, "verdicts", None) == []:
-                raise RuntimeError("faithfulness 返回空 verdict（会兜底满分），该轮判分无效")
+            if not getattr(metric, "verdicts", None):
+                scores[name] = {"status": "error", "score": None, "runs": runs, "reason": "空判定，不能计满分"}
+                break
             values.append(float(metric.score))
             reasons.append(str(metric.reason or ""))
-        scores[name] = {"score": sum(values) / len(values), "scores": values, "reasons": reasons,
+        if scores.get(name, {}).get("status") == "error":
+            continue
+        scores[name] = {"status": "completed", "score": sum(values) / len(values), "scores": values, "reasons": reasons, "runs": runs,
                         "passed": all(value >= config["threshold"] for value in values)}
     return scores
 
@@ -118,14 +143,14 @@ async def run(case_ids=None, judge=True):
     results = []
     config = {"run_id": settings.run_id, "expected_count": len(cases), "judge": runtime_judge_config() if judge else None,
               "dataset_sha256": hashlib.sha256((dataset / "cases.jsonl").read_bytes()).hexdigest(),
-              "scope": "真实面试接口（NDJSON 流）；判分输入全部来自 done 事件，不依赖业务侧埋点",
+              "scope": "真实面试接口；使用 QA 实际发送快照；拒答核查独立于原版 Answer Relevancy",
               "session_ids": []}
 
     def save():
         (report / "case-results.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in results), encoding="utf-8")
         by_group = {"normal": [], "no_evidence": []}
         for row in results:
-            if row["status"] == "completed" and judge:
+            if row.get("metrics") and judge:
                 by_group.setdefault(row.get("group") or "normal", []).append(row)
         excluded = sum(r["status"] == "excluded" for r in results)
         failed = sum(r["status"] == "failed" for r in results)
@@ -133,13 +158,11 @@ async def run(case_ids=None, judge=True):
             completed_count=sum(r["status"] == "completed" for r in results),
             failed_count=failed,
             excluded_count=excluded,
-            aggregate={name: sum(row["metrics"][name]["score"] for row in rows) / len(rows)
-                       for name in ("faithfulness", "answer_relevancy")
-                       for rows in [by_group["normal"]] if judge and rows},
-            no_evidence_control={name: sum(row["metrics"][name]["score"] for row in rows) / len(rows)
-                                 for name in ("faithfulness", "answer_relevancy")
-                                 for rows in [by_group["no_evidence"]] if judge and rows},
-            completed_by_group={group: len(rows) for group, rows in by_group.items()},
+            aggregate=aggregate_metrics(by_group["normal"]) if judge else {},
+            no_evidence_control=aggregate_metrics(by_group["no_evidence"]) if judge else {},
+            completed_by_group={group: sum(row["status"] == "completed" for row in rows) for group, rows in by_group.items()},
+            refusal_audit={label: sum((r.get("metrics", {}).get("answer_audit") or {}).get("refusal_assessment") == label
+                                     for r in results) for label in ("reasonable", "unreasonable", "uncertain", "not_applicable")},
         )
         (report / "summary.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -206,6 +229,7 @@ async def run(case_ids=None, judge=True):
                       "topic": row.get("topic") or "", "status": "failed",
                       "question": row["request"].get("userInput"), "request": request, "metrics": {}}
             try:
+                result["stage"] = "collect_stream"
                 events = []
                 # 该流是 NDJSON（application/x-ndjson，每行一个 {"event","data"}），
                 # 不是 SSE——按 SSE 的 `data:` 行解析会得到 0 事件。
@@ -216,6 +240,11 @@ async def run(case_ids=None, judge=True):
                         if line:
                             events.append(json.loads(line))
                 terminal = [e for e in events if e.get("event") == "done"]
+                result["stream_diagnostics"] = {
+                    "event_counts": {name: sum(e.get("event") == name for e in events)
+                                     for name in {str(e.get("event")) for e in events}},
+                    "done_count": len(terminal),
+                }
                 if len(terminal) != 1 or any(e.get("event") == "error" for e in events):
                     raise ValueError("面试流未正常完成")
                 output = terminal[0]["data"]
@@ -227,12 +256,10 @@ async def run(case_ids=None, judge=True):
                 result["meta"] = meta
                 result["session_id"] = output.get("sessionId")
                 config["session_ids"].append(output.get("sessionId"))
-                # 判分输入全部来自 done 事件：回复 + 该轮真实检索到的片段。
-                context = [
-                    str(item.get("content") or "")
-                    for item in (output.get("sources") or [])
-                    if isinstance(item, dict)
-                ]
+                # 只接受实际发送快照，不通过 sources 重新构造模型未必看过的依据。
+                result["stage"] = "validate_capture"
+                context, capture = captured_evidence(output, request["userInput"])
+                result["generation_input"] = capture
                 result.update(actual_output=reply, actual_retrieval_context=context,
                               response={"assistantReply": reply, "sources": output.get("sources") or [],
                                         "nextAction": output.get("nextAction")})
@@ -248,10 +275,20 @@ async def run(case_ids=None, judge=True):
                     print(row["case_id"], "excluded", flush=True)
                     continue
                 if judge:
-                    result["metrics"] = await asyncio.to_thread(
-                        evaluate_reply, json.dumps({"question": request["userInput"]}, ensure_ascii=False), reply, context
-                    )
-                result["status"] = "completed"
+                    if capture["modelCalled"] is False:
+                        result["status"] = "excluded"
+                        result["excluded_reason"] = "澄清由流程直接返回，未调用回答模型"
+                        save()
+                        continue
+                    result["stage"] = "judge"
+                    result["metrics"] = await asyncio.to_thread(evaluate_reply, request["userInput"], reply, context)
+                metric_errors = any(
+                    result["metrics"].get(name, {}).get("status") == "error"
+                    for name in ("faithfulness", "answer_relevancy")
+                )
+                result["status"] = "failed" if metric_errors else "completed"
+                if result["metrics"].get("answer_audit", {}).get("status") == "error":
+                    result["diagnostic_warning"] = "回答证据引用核查存在格式差异，未影响两项 DeepEval 指标计分"
             except Exception as exc:
                 result["error_type"] = type(exc).__name__
                 result["error_chain"] = error_types(exc)

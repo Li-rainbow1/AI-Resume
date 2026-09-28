@@ -50,13 +50,20 @@ async def test_rag_document_lifecycle(
     assert str(query_result.get("answer") or "").strip()
     sources = query_result.get("sources") or []
     assert sources
-    assert any((source.get("metadata") or {}).get("documentId") == document_id for source in sources)
+    assert any(
+        (source.get("metadata") or {}).get("documentId") == document_id
+        and (source.get("metadata") or {}).get("ingestSource") == "text_document"
+        and test_document.marker in str(source.get("content") or "")
+        for source in sources
+    )
 
     image_query_result = await rag_client.query(test_document.vision_marker)
     image_sources = image_query_result.get("sources") or []
+    expected_vision_text = f"{test_document.vision_marker} Mock 图片文字"
     assert any(
         (source.get("metadata") or {}).get("documentId") == document_id
         and (source.get("metadata") or {}).get("ingestSource") == "image_vision"
+        and expected_vision_text in str(source.get("content") or "")
         for source in image_sources
     )
 

@@ -12,5 +12,5 @@ class VectorStorePort(Protocol):
         embeddings: list[list[float]],
     ) -> int: ...
 
-    # 查询接口统一返回 source_id/content/metadata 结构，供 RAG 检索层消费。
+    # 查询接口返回 source_id/content/metadata 及可选 chunk_id，供 RAG 检索层消费。
     def similarity_search(self, query: str, top_k: int, project_ids: list[str] | None = None) -> list[dict[str, Any]]: ...

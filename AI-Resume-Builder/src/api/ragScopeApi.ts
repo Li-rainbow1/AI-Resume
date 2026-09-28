@@ -30,15 +30,6 @@ export interface RagListFilters {
   projectId?: string
 }
 
-export interface RagQueryResult {
-  answer: string
-  knowledgeBaseIds: string[]
-  knowledgeBaseNames: string[]
-  /** 旧响应字段，后端仍返回一版。 */
-  projectIds: string[]
-  sources: Array<{ sourceId: string; content: string; metadata: Record<string, unknown> }>
-}
-
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetchWithAuth(API_BASE_PATH + '/ai/rag' + path, {
     method,
@@ -85,9 +76,6 @@ export const changeRagDocumentScope = (id: string, scope: RagDocumentScope) =>
     scopeKind: scope.scopeKind === 'knowledge_base' ? 'project' : scope.scopeKind,
     projectId: scope.projectId || scope.knowledgeBaseId || null,
   })
-
-export const queryRagKnowledge = (query: string) =>
-  request<RagQueryResult>('/query', 'POST', { query })
 
 export function appendRagScope(form: FormData, scope?: RagDocumentScope) {
   if (!scope) return

@@ -431,6 +431,7 @@ class PgVectorStoreAdapter(RagScopeStoreMixin, RagAssetStoreMixin, RagImageStore
         availability = retrieval_document_condition(documents, chunks, joined_documents, project_ids)
         statement = (
             select(
+                chunks.c.id,
                 chunks.c.source_id,
                 chunks.c.content,
                 chunks.c["metadata"],
@@ -477,6 +478,7 @@ class PgVectorStoreAdapter(RagScopeStoreMixin, RagAssetStoreMixin, RagImageStore
             safe_metadata = metadata if isinstance(metadata, dict) else {}
             results.append(
                 {
+                    "chunk_id": str(row.get("id") or ""),
                     "source_id": str(row.get("source_id") or ""),
                     "content": str(row.get("content") or ""),
                     "metadata": {

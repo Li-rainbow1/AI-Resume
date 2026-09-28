@@ -36,7 +36,7 @@ async def health(real_allowed, performance_real_allowed=False):
         raise RuntimeError('隔离 Compose 配置无效，请检查 Docker 和 .env.test')
     services_to_check = ('backend', 'mysql', 'redis', 'pgvector', 'minio', 'image-worker')
     if not real_allowed:
-        services_to_check += ('frontend', 'mock-ai')
+        services_to_check += ('mock-ai',)
     for service in services_to_check:
         result = command(compose + ['ps', '-q', service])
         cid = result.stdout.strip()
@@ -47,10 +47,10 @@ async def health(real_allowed, performance_real_allowed=False):
         if not value.get('Running') or value.get('Health', {}).get('Status', 'healthy') != 'healthy':
             raise RuntimeError(f'隔离 Compose 服务不健康：{service}')
         # 核验运行中的容器，避免只检查配置文件却连接其他环境。
-        if service in {'backend', 'frontend'}:
+        if service == 'backend':
             ports = json.loads(command(['docker', 'inspect', '--format', '{{json .NetworkSettings.Ports}}', cid]).stdout)
-            target = urlparse(settings.base_url if service == 'backend' else settings.ui_base_url)
-            internal = '8999/tcp' if service == 'backend' else '80/tcp'
+            target = urlparse(settings.base_url)
+            internal = '8999/tcp'
             if target.hostname not in {'localhost', '127.0.0.1'} or target.scheme != 'http' or target.username:
                 raise RuntimeError('回归只允许本机隔离 QA HTTP 地址')
             if not any(p['HostIp'] == '127.0.0.1' and int(p['HostPort']) == target.port for p in ports.get(internal, [])):
@@ -63,8 +63,6 @@ async def health(real_allowed, performance_real_allowed=False):
                 raise RuntimeError(f'{service} 未完全指向 Mock AI，拒绝默认回归')
     async with httpx.AsyncClient(base_url=settings.base_url, timeout=15) as client:
         (await client.get('/health')).raise_for_status()
-        if not real_allowed:
-            (await client.get(settings.ui_base_url)).raise_for_status()
         session = await AuthClient(client).login_admin(settings.admin_username, settings.admin_password)
         client.headers['Authorization'] = f'Bearer {session.access_token}'
         services = await RagClient(client).list_system_services()
@@ -77,15 +75,6 @@ async def health(real_allowed, performance_real_allowed=False):
             configs = {s['serviceKey']: s['config'] for s in services}
             if any(urlparse(configs.get(k, {}).get('baseUrl', '')).hostname != 'mock-ai' for k in ('chat', 'embedding', 'vision')):
                 raise RuntimeError('管理员生效配置未完全指向 Mock AI，拒绝默认回归')
-    if real_allowed:
-        return
-    # 默认回归真实启动浏览器验证依赖。
-    from playwright.sync_api import sync_playwright
-    def browser_check():
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
-            browser.close()
-    await asyncio.to_thread(browser_check)
 
 
 def main():
@@ -106,7 +95,6 @@ def main():
     if not args.quality:
         for key in ('QA_RUN_RAG_QUALITY', 'QA_ALLOW_QUALITY_WRITES', 'QA_QUALITY_REAL_MODELS_CONFIRMED', 'QA_RUN_DEEPEVAL'):
             os.environ[key] = '0'
-    os.environ['QA_RUN_UI'] = '0' if args.quality else '1'
     if not args.quality:
         os.environ.update(QA_RUN_RAG_INTEGRATION='1', QA_ALLOW_RAG_WRITES='1', QA_RUN_LIVE_CONTRACT='1')
     os.environ['PYTEST_ADDOPTS'] = ''
@@ -140,8 +128,7 @@ def main():
         junit = args.report / f'{name}.xml'
         run_stage(name, [sys.executable, '-m', 'pytest', *paths, '-q', '-o', 'addopts=', '--tb=short',
             f'--junitxml={junit}', f'--basetemp={args.report / (name + "-temp")}',
-            f'--alluredir={args.report / "allure-results"}', f'--html={args.report / (name + ".html")}', '--self-contained-html',
-            '--browser', 'chromium', '--screenshot', 'only-on-failure', '--output', str(args.report / 'playwright')], junit)
+            f'--alluredir={args.report / "allure-results"}', f'--html={args.report / (name + ".html")}', '--self-contained-html'], junit)
 
     def generate_allure_report():
         """生成可直接打开的 Allure HTML 报告。"""
@@ -195,7 +182,6 @@ def main():
             pytest_stage('quality', ['tests/quality/test_real_rag_quality.py'])
         else:
             pytest_stage('api-mock', ['tests/api', 'tests/mock', 'tests/interview'])
-            pytest_stage('ui', ['tests/ui/test_markdown_image_preview.py'])
         if selected:
             for name in selected:
                 os.environ['PERF_RUN_' + SCENARIOS[name]] = '1'
@@ -213,7 +199,7 @@ def main():
                 run_stage(name, command_args)
     except Exception as exc:
         # 第三方异常不打印正文，避免连接信息泄露。
-        reason = str(exc) if isinstance(exc, RuntimeError) else f'{type(exc).__name__}：请检查 Docker、Playwright Chromium 和隔离环境依赖'
+        reason = str(exc) if isinstance(exc, RuntimeError) else f'{type(exc).__name__}：请检查 Docker 和隔离环境依赖'
         stages.append(dict(name='preflight-or-orchestration', exit_code=1, reason=reason))
         print(reason, flush=True)
     finally:

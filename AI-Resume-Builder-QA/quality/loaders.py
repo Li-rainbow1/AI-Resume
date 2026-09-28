@@ -1,27 +1,13 @@
-"""按 `schema_version` 分发数据集加载器。
-
-一个数据集只能声明一件事：这些题目怎么变成 `EvalCase`。指标、匹配器、报告都
-不认识数据集字段名，所以新增一个数据集 = 新增一个加载函数 + 一行注册。
-
-两代 schema 的差异在加载阶段被抹平：
-- `evidence-v3`（旧集）：题上一篇 `expected_document`，证据带 `match_patterns`
-  正则；加载后每个正则组变成一个「子项」，全部命中也只算一个答案单元。
-- `interview-notes-v1`（面试八股集）：题上多篇 `expected_documents`，答案单元给
-  `acceptable_evidence_ids`（或关系），不给正则，命中由语义判分器决定。
-
-语料完整性校验（路径不得越界 + SHA-256 必须一致）两代共用同一段实现。
-"""
+"""加载当前数据集并校验语料；RAG 检索评分使用固定片段 qrels。"""
 
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from quality.deepeval_adapter import RETRIEVAL_METRIC_KEYS
 from quality.models import (
     IMAGE_KIND,
-    LEGACY_SCHEMA_VERSION,
     TEXT_KIND,
     AnswerUnit,
     CaseSet,
@@ -84,12 +70,15 @@ def resolve_cases_path(dataset_path: Path, split: str | None = None) -> tuple[Pa
 
 
 def detect_schema_version(cases_path: Path) -> str:
-    """读第一道题声明的 schema_version；旧集没有该字段，回落到 evidence-v3。"""
+    """读取第一道题声明的数据集版本；缺少版本时明确报错。"""
     for raw_line in cases_path.read_text(encoding="utf-8").splitlines():
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
         payload = json.loads(raw_line)
-        return str(payload.get("schema_version") or LEGACY_SCHEMA_VERSION)
+        version = str(payload.get("schema_version") or "").strip()
+        if not version:
+            raise ValueError("数据集缺少 schema_version")
+        return version
     raise ValueError(f"数据集为空：{cases_path}")
 
 
@@ -132,6 +121,8 @@ def load_case_set(dataset_path: Path, split: str | None = None) -> CaseSet:
     if not cases:
         raise ValueError(f"评测数据集不能为空：{cases_path}")
     verify_corpus(dataset_dir, assets)
+    from quality.chunk_annotations import attach_annotations
+    cases = attach_annotations(cases, dataset_dir, cases_path)
     return CaseSet(
         schema_version=schema_version,
         dataset_dir=dataset_dir,
@@ -140,123 +131,6 @@ def load_case_set(dataset_path: Path, split: str | None = None) -> CaseSet:
         assets=tuple(assets),
     )
 
-
-# --------------------------------------------------------------------------- #
-# 旧集：单文档 + 正则
-# --------------------------------------------------------------------------- #
-
-_LEGACY_REQUIRED_FIELDS = {
-    "case_id",
-    "question",
-    "reference_answer",
-    "expected_document",
-    "expected_source_location",
-    "expected_facts",
-    "forbidden_facts",
-    "question_type",
-    "top_k",
-}
-_LEGACY_TYPES = {"text", "image_ocr", "table_or_flow", "mixed", "no_answer"}
-_LEGACY_MAX_TOP_K = 5
-
-
-def _legacy_unit(unit_id: str, unit: dict, expected_document: str) -> AnswerUnit:
-    if unit.get("kind") not in {TEXT_KIND, IMAGE_KIND}:
-        raise ValueError(f"证据类型不支持：{unit_id}")
-    patterns = unit.get("match_patterns")
-    if not patterns or any(not group for group in patterns):
-        raise ValueError("证据缺少匹配规则")
-    for group in patterns:
-        for pattern in group:
-            re.compile(pattern)
-    selector = SourceSelector(
-        document=expected_document,
-        kind=unit["kind"],
-        locator=unit.get("asset") if unit["kind"] == IMAGE_KIND else None,
-    )
-    return AnswerUnit(
-        unit_id=unit_id,
-        claim=unit_id,
-        selectors=(selector,),
-        required_parts=len(patterns),
-        patterns=tuple(tuple(group) for group in patterns),
-        acceptance="正则组全部命中即覆盖",
-    )
-
-
-@register_loader(LEGACY_SCHEMA_VERSION)
-def load_legacy_v3(cases_path: Path, dataset_dir: Path) -> tuple[list[EvalCase], list[CorpusAsset]]:
-    annotations = json.loads((dataset_dir / "evidence_annotations.json").read_text(encoding="utf-8"))
-    assets = [
-        CorpusAsset(relative_path=str(item["path"]), sha256=str(item["sha256"]), kind="document")
-        for item in annotations["corpus_manifest"]
-    ]
-    cases: list[EvalCase] = []
-    seen_ids: set[str] = set()
-    for payload in iter_cases(cases_path):
-        missing = _LEGACY_REQUIRED_FIELDS - payload.keys()
-        if missing:
-            raise ValueError(f"第 {payload.get('case_id')} 题缺少字段：{sorted(missing)}")
-        case_id = str(payload["case_id"])
-        if case_id in seen_ids:
-            raise ValueError(f"case_id 重复：{case_id}")
-        question_type = str(payload["question_type"])
-        if question_type not in _LEGACY_TYPES:
-            raise ValueError(f"不支持的问题类型：{question_type}")
-        top_k = int(payload["top_k"])
-        if not 1 <= top_k <= _LEGACY_MAX_TOP_K:
-            raise ValueError(f"top_k 超出接口范围：{case_id}")
-        if not str(payload["question"]).strip() or not str(payload["reference_answer"]).strip():
-            raise ValueError(f"必要内容为空：{case_id}")
-        if not payload["expected_facts"]:
-            raise ValueError(f"必要内容为空：{case_id}")
-        if question_type != "no_answer" and not payload["expected_source_location"]:
-            raise ValueError(f"有答案用例缺少来源位置：{case_id}")
-        seen_ids.add(case_id)
-        cases.append(payload)
-
-    reviewed = annotations["retrieval_cases"] + annotations["no_answer_cases"]
-    by_id = {item["case_id"]: item for item in reviewed}
-    if len(by_id) != len(reviewed) or set(by_id) != seen_ids:
-        raise ValueError("题目与证据标注 ID 不一致")
-
-    enriched: list[EvalCase] = []
-    for payload in cases:
-        case_id = str(payload["case_id"])
-        item = by_id[case_id]
-        if any(item[key] != payload[key] for key in ("question", "reference_answer", "top_k", "question_type")):
-            raise ValueError(f"题目与证据版本不一致：{case_id}")
-        expected_document = str(payload["expected_document"])
-        answerable = payload["question_type"] != "no_answer"
-        evidence = {key: annotations["evidence_units"][key] for key in item["required_evidence"]}
-        if not answerable:
-            if evidence or item["count_as_pass"] or item["include_in_retrieval_aggregate"]:
-                raise ValueError("无答案题不得自动计为通过")
-        elif not evidence:
-            raise ValueError(f"缺少精确证据：{case_id}")
-        enriched.append(
-            EvalCase(
-                schema_version=LEGACY_SCHEMA_VERSION,
-                case_id=case_id,
-                question=str(payload["question"]),
-                reference_answer=str(payload["reference_answer"]),
-                top_k=int(payload["top_k"]),
-                answerable=answerable,
-                units=tuple(_legacy_unit(key, unit, expected_document) for key, unit in evidence.items()),
-                expected_documents=(expected_document,),
-                forbidden_claims=tuple(payload["forbidden_facts"]),
-                question_type=str(payload["question_type"]),
-                expected_facts=tuple(payload["expected_facts"]),
-                # 旧集只测检索侧两项；回答侧两项当时没有可比口径，不追溯补测。
-                judge_metrics=RETRIEVAL_METRIC_KEYS,
-            )
-        )
-    return enriched, assets
-
-
-# --------------------------------------------------------------------------- #
-# 面试八股集：多文档 + 语义判分
-# --------------------------------------------------------------------------- #
 
 _NOTES_SCHEMA_VERSION = "interview-notes-v1"
 _NOTES_REQUIRED_FIELDS = {
@@ -301,7 +175,6 @@ def _notes_unit(payload: dict, evidence_units: dict) -> AnswerUnit:
         unit_id=unit_id,
         claim=claim,
         selectors=tuple(selectors),
-        required_parts=1,
         acceptance=str(payload.get("acceptance") or ""),
     )
 

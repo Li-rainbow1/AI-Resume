@@ -1,29 +1,21 @@
-"""确定性检索指标与报告的契约测试。
+"""固定检索片段标注、指标与报告的契约测试；全部使用内存样例，不调用模型。"""
 
-这些用例不再依赖任何具体数据集文件——旧的 `golden_dataset.jsonl` 已不在本机，
-所以题目全部在内存里构造。数据集加载与 schema 分发的契约在
-`test_dataset_loaders.py`，判分器契约在 `test_semantic_matchers.py`。
-
-题目用正则单元构造，因此整份文件完全离线、不调用任何模型。
-"""
-
+import hashlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from quality.loaders import CaseSet
-from quality.metrics import SCORING_VERSION, evaluate_case, source_matches
+from quality.metrics import SCORING_VERSION, evaluate_case
+from quality.chunk_annotations import ChunkAnnotationError
 from quality.models import (
-    IMAGE_KIND,
-    LEGACY_SCHEMA_VERSION,
-    TEXT_KIND,
-    AnswerUnit,
+    NOTES_SCHEMA_VERSION,
     CaseResult,
     EvalCase,
-    SourceSelector,
 )
 from quality.reporting import write_reports
 from quality.runner import run_quality_evaluation
@@ -33,102 +25,77 @@ DOCUMENT = "1-测试.md"
 BADGE = "附件/badge.png"
 
 
-def _text_source(content: str, document: str = DOCUMENT) -> dict:
-    return {"content": content, "metadata": {"documentId": "doc-1", "originalFilename": document,
-                                             "ingestSource": "text_document"}}
+def _text_source(content: str, chunk_id: str = "text-a", document: str = DOCUMENT,
+                 document_id: str = "doc-1", chunk_index: int = 0) -> dict:
+    return {"chunk_id": chunk_id, "content": content, "metadata": {
+        "documentId": document_id, "originalFilename": document,
+        "ingestSource": "text_document", "sourceType": "text", "chunkIndex": chunk_index,
+    }}
 
 
-def _image_source(content: str, locator: str = BADGE, document: str = DOCUMENT) -> dict:
-    return {"content": content, "metadata": {"documentId": "doc-1", "originalFilename": document,
-                                             "ingestSource": "image_vision",
-                                             "imageSourceLocator": locator}}
+def _image_source(content: str, locator: str = BADGE, document: str = DOCUMENT,
+                  document_id: str = "doc-1", extraction_id: str = "image-1",
+                  chunk_offset: int = 0) -> dict:
+    return {"content": content, "metadata": {
+        "documentId": document_id, "originalFilename": document,
+        "ingestSource": "image_vision", "sourceType": "image",
+        "imageSourceLocator": locator, "imageExtractionId": extraction_id,
+        "imageChunkOffset": chunk_offset,
+    }}
 
 
-def _unit(unit_id: str, claim: str, *patterns: str, kind: str = TEXT_KIND, locator: str | None = None) -> AnswerUnit:
-    """正则单元：每个正则是一个必须命中的子项，全部命中才算覆盖。"""
-    return AnswerUnit(
-        unit_id=unit_id,
-        claim=claim,
-        selectors=(SourceSelector(document=DOCUMENT, kind=kind, locator=locator),),
-        required_parts=len(patterns),
-        patterns=tuple((pattern,) for pattern in patterns),
+def _chunk(chunk_id: str, content: str, *, source_type: str = "text", chunk_index: int = 0,
+           extraction_id: str = "", chunk_offset: int = 0) -> dict:
+    return {
+        "chunk_id": chunk_id, "runtime_chunk_id": f"runtime-{chunk_id}",
+        "content": content, "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
+        "document_id": "doc-1", "source_type": source_type, "chunk_index": chunk_index,
+        "image_extraction_id": extraction_id, "image_chunk_offset": chunk_offset,
+    }
+
+
+def _metric_case(relevant_ids: tuple[str, ...], chunks: tuple[dict, ...], top_k: int = 4) -> EvalCase:
+    case = EvalCase(
+        schema_version=NOTES_SCHEMA_VERSION, case_id="QA-001", question="问题？",
+        reference_answer="参考答案", top_k=top_k, answerable=True,
+    )
+    return replace(case, relevant_chunk_ids=relevant_ids, chunk_snapshot=chunks,
+                   chunk_snapshot_version="test-snapshot-v1")
+
+
+def _text_chunks() -> tuple[dict, ...]:
+    return (
+        _chunk("text-a", "流程：受理与审核", chunk_index=0),
+        _chunk("text-b", "流程：批准与归档", chunk_index=1),
+        _chunk("text-noise", "与本题无关的正文", chunk_index=2),
     )
 
 
-def _image_case(top_k: int = 4) -> EvalCase:
-    """单元落在图片上：既要文档归属正确，也要图片定位正确。"""
-    return EvalCase(
-        schema_version=LEGACY_SCHEMA_VERSION,
-        case_id="IMG-001",
-        question="徽章上的访问码是多少？",
-        reference_answer="访问码是 LIME-482。",
-        top_k=top_k,
-        answerable=True,
-        units=(_unit("fact-1", "访问码是 LIME-482", "lime-482", kind=IMAGE_KIND, locator=BADGE),),
-        expected_documents=(DOCUMENT,),
-        question_type="image_ocr",
-    )
+def test_image_source_must_resolve_to_the_frozen_document_and_chunk() -> None:
+    content = "图片中的访问码：LIME-482"
+    chunks = (_chunk("image-a", content, source_type="image", extraction_id="extract-1"),)
+    case = _metric_case(("image-a",), chunks)
+    assert evaluate_case(case, "", [_image_source(content, extraction_id="extract-1")])["recall_at_k"] == 1.0
+    with pytest.raises(ChunkAnnotationError, match="无法唯一对应冻结快照"):
+        evaluate_case(case, "", [_image_source(content, document_id="other-document", extraction_id="extract-1")])
 
 
-def _text_case() -> EvalCase:
-    """U1 需要两个子项同时命中，U2 只需要一个；用来区分「单元」与「子项」。"""
-    return EvalCase(
-        schema_version=LEGACY_SCHEMA_VERSION,
-        case_id="TXT-001",
-        question="交付流程有哪些节点？",
-        reference_answer="受理、审核、批准、归档。",
-        top_k=4,
-        answerable=True,
-        units=(
-            _unit("flow-a", "流程包含受理与审核", "受理", "审核"),
-            _unit("flow-b", "流程包含批准", "批准"),
-        ),
-        expected_documents=(DOCUMENT,),
-    )
-
-
-def test_source_matches_translates_legacy_location_dict() -> None:
-    """兼容入口：位置字典仍然是「图片定位」或「正文入库」两种含义。"""
-    assert source_matches(_image_source("x"), DOCUMENT, {"imageLocator": BADGE})
-    assert not source_matches(_image_source("x", locator="other.png"), DOCUMENT, {"imageLocator": BADGE})
-    assert source_matches(_text_source("x"), DOCUMENT, {"ingestSource": "text_document"})
-    assert not source_matches(_image_source("x"), DOCUMENT, {"ingestSource": "text_document"})
-    # 文档名走后缀匹配：上传时会加 run 前缀，仍然要能命中。
-    assert source_matches(_text_source("x", document="qa-rag-run-1-测试.md"), DOCUMENT)
-    assert not source_matches(_text_source("x", document="noise-alpha.md"), DOCUMENT)
-
-
-def test_image_unit_needs_both_document_and_locator() -> None:
-    case = _image_case()
-    assert evaluate_case(case, "", [_image_source("访问码 LIME-482")])["recall_at_k"] == 1.0
-    # 图片定位错 -> 没覆盖；该片段也没支持任何所问事实 -> 返回精度记 0。
-    wrong_locator = evaluate_case(case, "", [_image_source("访问码 LIME-482", locator="other.png")])
-    assert wrong_locator["recall_at_k"] == 0.0
-    assert wrong_locator["precision_at_returned"] == 0.0
-    assert wrong_locator["mrr"] == 0.0
-    # 图片片段不能顶替正文证据：正文单元的 kind 会把它排除掉。
-    assert evaluate_case(_text_case(), "", [_image_source("流程包含受理与审核")])["recall_at_k"] == 0.0
-
-
-def test_recall_counts_units_and_accumulates_parts_across_snippets() -> None:
-    """单元内子项允许跨片段凑齐；同一单元只计一次分。"""
-    case = _text_case()
-    # U1 的两个子项只命中一个，不算覆盖。
-    assert evaluate_case(case, "", [_text_source("这里只讲受理")])["recall_at_k"] == 0.0
-    # 两条片段各讲一半，合起来才覆盖 U1；U2 仍然缺。
-    split = evaluate_case(case, "", [_text_source("这里只讲受理"), _text_source("这里只讲审核")])
-    assert split["recall_at_k"] == 0.5
-    assert evaluate_case(case, "", [_text_source("受理与审核"), _text_source("批准")])["recall_at_k"] == 1.0
-    # 同一单元被三条片段重复覆盖，也只算一个单元。
-    repeated = evaluate_case(case, "", [_text_source("批准"), _text_source("批准"), _text_source("批准")])
-    assert repeated["recall_at_k"] == 0.5
+def test_recall_counts_retrieved_relevant_chunk_ids() -> None:
+    chunks = _text_chunks()
+    case = _metric_case(("text-a", "text-b"), chunks)
+    first = _text_source("流程：受理与审核", chunk_index=0)
+    second = _text_source("流程：批准与归档", chunk_id="text-b", chunk_index=1)
+    assert evaluate_case(case, "", [first])["recall_at_k"] == 0.5
+    assert evaluate_case(case, "", [first, second])["recall_at_k"] == 1.0
 
 
 def test_mrr_reflects_first_relevant_rank() -> None:
     """MRR 补的是排序维度：Recall@K 只看「在不在 TopK 内」，MRR 看「排在第几」。"""
-    case = _image_case()
-    relevant = _image_source("访问码 LIME-482")
-    irrelevant = _text_source("与本题无关的正文")
+    chunks = (_chunk("image-a", "图片中的访问码：LIME-482", source_type="image", extraction_id="extract-1"),
+              _chunk("text-noise", "与本题无关的正文"))
+    case = _metric_case(("image-a",), chunks)
+    relevant = _image_source("图片中的访问码：LIME-482", extraction_id="extract-1")
+    irrelevant = _text_source("与本题无关的正文", chunk_id="text-noise", chunk_index=2)
     assert evaluate_case(case, "", [relevant])["mrr"] == 1.0
     assert evaluate_case(case, "", [irrelevant, relevant])["mrr"] == 0.5
     assert evaluate_case(case, "", [irrelevant, irrelevant, relevant])["mrr"] == pytest.approx(1 / 3)
@@ -143,24 +110,46 @@ def test_mrr_reflects_first_relevant_rank() -> None:
 
 def test_precision_at_returned_uses_actual_return_count() -> None:
     """分母是实际返回条数，不是 top_k：只返 1 条且命中时就是满分。"""
-    case = _text_case()
-    one = evaluate_case(case, "", [_text_source("受理与审核")])
+    chunks = _text_chunks()
+    case = _metric_case(("text-a", "text-b"), chunks)
+    one = evaluate_case(case, "", [_text_source("流程：受理与审核", chunk_index=0)])
     assert one["precision_at_returned"] == 1.0
     empty = evaluate_case(case, "", [])
     assert empty["precision_at_returned"] is None
     # 未命中任何单元的片段仍然计入「实际返回」，所以这个指标能掉下来。
-    noise = evaluate_case(case, "", [_text_source("无关正文"), _text_source("批准")])
+    noise = evaluate_case(case, "", [
+        _text_source("与本题无关的正文", chunk_id="text-noise", chunk_index=2),
+        _text_source("流程：批准与归档", chunk_id="text-b", chunk_index=1),
+    ])
     assert noise["precision_at_returned"] == 0.5
 
 
 def test_duplicate_content_keeps_rank_but_does_not_score_twice() -> None:
     """同内容多分片占排名，但只算一个相关片段，返回精度会被稀释。"""
-    case = _image_case()
-    duplicate = _image_source("访问码 LIME-482")
+    content = "图片中的访问码：LIME-482"
+    case = _metric_case(("image-a",),
+                        (_chunk("image-a", content, source_type="image", extraction_id="extract-1"),))
+    duplicate = _image_source(content, extraction_id="extract-1")
     metrics = evaluate_case(case, "", [duplicate, dict(duplicate), dict(duplicate)])
     assert metrics["recall_at_k"] == 1.0
     assert metrics["precision_at_returned"] == 1 / 3
     assert metrics["mrr"] == 1.0
+
+
+def test_zero_return_keeps_recall_and_mrr_zero_but_precision_not_applicable() -> None:
+    case = _metric_case(("text-a",), _text_chunks())
+    metrics = evaluate_case(case, "", [])
+    assert metrics == {"recall_at_k": 0.0, "precision_at_returned": None, "mrr": 0.0}
+
+
+def test_missing_fixed_chunk_annotation_fails_without_judge_fallback() -> None:
+    case = EvalCase(
+        schema_version=NOTES_SCHEMA_VERSION, case_id="NO-QRELS", question="问题？",
+        reference_answer="答案", top_k=4, answerable=True,
+    )
+
+    with pytest.raises(ChunkAnnotationError, match="缺少固定片段标注"):
+        evaluate_case(case, "", [_text_source("内容")])
 
 
 def test_no_answer_cases_have_no_deterministic_gate() -> None:
@@ -181,7 +170,7 @@ def test_no_answer_cases_have_no_deterministic_gate() -> None:
     )
     metrics = evaluate_case(case, "负责人出生于 2000 年。", [_text_source("无关内容")])
     assert set(metrics.values()) == {None}
-    assert SCORING_VERSION == "evidence-v4"
+    assert SCORING_VERSION == "chunk-qrels-v1"
 
 
 class _ServiceClient:
@@ -292,9 +281,9 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cases = (
-        _text_case(),
+        _metric_case(("text-a",), _text_chunks()),
         EvalCase(
-            schema_version=LEGACY_SCHEMA_VERSION, case_id="NA-001", question="没有这回事吧？",
+            schema_version=NOTES_SCHEMA_VERSION, case_id="NA-001", question="没有这回事吧？",
             reference_answer="资料未提供。", top_k=4, answerable=False, question_type="no_answer",
         ),
     )
@@ -303,7 +292,7 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(
     monkeypatch.setattr(
         "quality.runner.load_case_set",
         lambda *_args, **_kwargs: CaseSet(
-            schema_version=LEGACY_SCHEMA_VERSION, dataset_dir=tmp_path,
+            schema_version=NOTES_SCHEMA_VERSION, dataset_dir=tmp_path,
             cases_path=tmp_path / "cases.jsonl", cases=cases,
         ),
     )
@@ -340,101 +329,3 @@ async def test_setup_failure_still_builds_sanitized_case_evidence(
     assert not_applicable.evaluation_status == "not_applicable"
     assert not_applicable.passed is None
     assert not_applicable.failure_reasons == []
-
-
-class _JudgeDownMatcher:
-    """判分端点不可用时的匹配器桩：证据判分一调就断连。"""
-
-    name = "semantic-llm"
-
-    def match_many(self, *_args: object, **_kwargs: object) -> dict:
-        import httpx
-        import openai
-
-        raise openai.APIConnectionError(request=httpx.Request("POST", "https://judge.invalid/v1"))
-
-
-class _JudgeDownCorpus:
-    primary_assets = ["primary"]
-    noise_assets: list[str] = []
-    document_file_names = ["qa-rag-judge-down-corpus.md"]
-    noise_file_names: list[str] = []
-    attachment_assets: list[str] = []
-    #: 是**集合**不是数量：`runner` 会 `len()` 它。
-    expected_unreferenced_attachments: tuple[str, ...] = ()
-
-
-class _JudgeDownClient:
-    """检索正常、判分断连的假客户端：上传与查询都不发请求，但查询能返回一条命中片段。"""
-
-    async def upload_stream(self, assets: list) -> list[dict]:
-        return [
-            {
-                "event": "file-result",
-                "result": {
-                    "status": "success",
-                    "document_id": "doc-1",
-                    "file_name": "qa-rag-judge-down-corpus.md",
-                    "referenced_image_count": 0,
-                    "matched_image_count": 0,
-                    "missing_image_count": 0,
-                },
-            },
-            {"event": "batch-complete"},
-        ]
-
-    async def query(self, _question: str, _top_k: int) -> dict:
-        # 正文片段与图片片段都给上：两题的单元都能落到某个片段上，证据判分才真的会被调用。
-        return {
-            "answer": "受理、审核、批准、归档。",
-            "sources": [_text_source("流程包含受理与审核"), _image_source("访问码 LIME-482")],
-        }
-
-
-@pytest.mark.asyncio
-async def test_judge_transport_failure_does_not_abort_the_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """判分断连只能废掉「这一题」，不能废掉整轮。
-
-    2026-09-17 的那轮 50 题就是这个样子：跑到第 9 题，确定性层的证据判分抛
-    `APIConnectionError`——它不是 `ValueError`，`SemanticMatcher` 与 `runner` 都接不住，
-    整个测试会话直接中止，后面 41 题一行报告都没写（50 题要跑 1~2 小时）。
-    """
-    cases = (_text_case(), _image_case())
-    (tmp_path / "cases.jsonl").write_text("", encoding="utf-8")
-    (tmp_path / "evidence_annotations.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(
-        "quality.runner.load_case_set",
-        lambda *_args, **_kwargs: CaseSet(
-            schema_version=LEGACY_SCHEMA_VERSION, dataset_dir=tmp_path,
-            cases_path=tmp_path / "cases.jsonl", cases=cases,
-        ),
-    )
-    monkeypatch.setattr("quality.runner.corpus_for", lambda *_args, **_kwargs: _JudgeDownCorpus())
-    monkeypatch.setattr("quality.runner.matcher_for_cases", lambda _cases: _JudgeDownMatcher())
-    monkeypatch.setattr("quality.runner.write_reports", lambda *_args, **_kwargs: None)
-    run_id = "jd-" + uuid4().hex[:8]
-    try:
-        results = await run_quality_evaluation(
-            _JudgeDownClient(),  # type: ignore[arg-type]
-            run_id,
-            tmp_path,
-            1,
-            0.01,
-            False,
-            "localhost",
-        )
-    finally:
-        _remove_tree(Path(__file__).resolve().parents[2] / "reports" / "quality" / run_id)
-    # 两题都要有结果——这正是修复前拿不到的东西。
-    assert [result.case_id for result in results] == ["TXT-001", "IMG-001"]
-    for result in results:
-        assert result.bad_case_categories == ["上游模型或网络失败"], result.failure_reasons
-        assert result.failure_reasons == ["Judge 执行失败：APIConnectionError"]
-        assert result.passed is False
-        # 指标按零命中写，不能因为「没判成」而看起来像通过。
-        assert result.deterministic_metrics["recall_at_k"] == 0.0
-        assert result.deterministic_metrics["mrr"] == 0.0
-        # 报告只留异常类型，不夹带端点与鉴权信息。
-        assert "judge.invalid" not in json.dumps(result.failure_reasons)

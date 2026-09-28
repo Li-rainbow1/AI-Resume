@@ -6,7 +6,7 @@ DeepEval 的指标需要一个 `DeepEvalBaseLLM`；这里只做「协议转换�
 超时、重试策略都只有一处定义）。
 
 这个模块会 import `deepeval`，属于 `[eval]` 可选依赖，因此**不要**从
-`quality.matchers` / `quality.runner` 的模块顶层 import 它；`deepeval_adapter`
+`quality.runner` 的模块顶层 import 它；`deepeval_adapter`
 也是在函数内导入，保证没装 `[eval]` 时那条链路仍可 import。
 """
 
@@ -46,7 +46,7 @@ class DeepEvalJudgeLLM(DeepEvalBaseLLM):
         """按 schema 返回校验过的对象；结构不合法时重试，最多 `max_attempts` 次。
 
         只重试「返回了但结构不对」这种情况——网络与鉴权错误直接抛出，重试只会
-        把失败面拖长。策略与 `SemanticMatcher` 一致。
+        把失败面拖长。
         """
         system = self._system_prompt(schema)
         attempts = max(1, self.config.max_attempts)

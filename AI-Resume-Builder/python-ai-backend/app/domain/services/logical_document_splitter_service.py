@@ -100,18 +100,26 @@ class LogicalDocumentSplitterService:
         current_body_blocks: list[str] = []
         preamble_blocks: list[str] = []
 
+        def append_current() -> None:
+            if current_heading is None:
+                return
+            body = "\n\n".join(current_body_blocks).strip()
+            if not self._has_meaningful_body(body):
+                return
+            parts.append(
+                _LogicalDocumentPart(
+                    title_raw=current_heading.raw,
+                    title_text=current_heading.text,
+                    title_kind=current_heading.kind,
+                    body=body,
+                )
+            )
+
         for index, block in enumerate(blocks):
             candidate = candidates[index]
             if index in title_indexes and candidate is not None:
                 if current_heading is not None:
-                    parts.append(
-                        _LogicalDocumentPart(
-                            title_raw=current_heading.raw,
-                            title_text=current_heading.text,
-                            title_kind=current_heading.kind,
-                            body="\n\n".join(current_body_blocks).strip(),
-                        )
-                    )
+                    append_current()
                 elif preamble_blocks:
                     parts.append(
                         _LogicalDocumentPart(
@@ -133,14 +141,7 @@ class LogicalDocumentSplitterService:
                 current_body_blocks.append(block)
 
         if current_heading is not None:
-            parts.append(
-                _LogicalDocumentPart(
-                    title_raw=current_heading.raw,
-                    title_text=current_heading.text,
-                    title_kind=current_heading.kind,
-                    body="\n\n".join(current_body_blocks).strip(),
-                )
-            )
+            append_current()
 
         if preamble_blocks and not parts:
             parts.append(
@@ -152,6 +153,12 @@ class LogicalDocumentSplitterService:
                 )
             )
         return [part for part in parts if part.content.strip()]
+
+    @staticmethod
+    def _has_meaningful_body(body: str) -> bool:
+        """图片引用单独由图片链路入库，不能形成只有标题和链接的正文片段。"""
+        without_images = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", body or "")
+        return bool(without_images.strip())
 
     def _detect_heading_candidate(self, block: str) -> _HeadingCandidate | None:
         normalized_block = block.replace("\uff03", "#").strip()
@@ -202,7 +209,34 @@ class LogicalDocumentSplitterService:
 
     @staticmethod
     def _split_blocks(content: str) -> list[str]:
-        return [block.strip() for block in re.split(r"\n{2,}", content) if block and block.strip()]
+        # 围栏内的空行、缩进和标题都是示例内容，必须整块保留。
+        # 只在围栏外按空行分组，避免方法缩进丢失或示例标题污染后续章节。
+        blocks: list[str] = []
+        current: list[str] = []
+        marker = ""
+
+        def flush() -> None:
+            block = "\n".join(current).strip("\n")
+            if block.strip():
+                blocks.append(block)
+            current.clear()
+
+        for line in content.splitlines():
+            if marker:
+                current.append(line)
+                if re.fullmatch(r" {0,3}" + re.escape(marker[0]) + "{" + str(len(marker)) + r",}\s*", line):
+                    marker = ""
+                continue
+            fence = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if fence:
+                marker = fence.group(1)
+                current.append(line)
+            elif not line.strip():
+                flush()
+            else:
+                current.append(line)
+        flush()
+        return blocks
 
     @staticmethod
     def _collapse_whitespace(content: str) -> str:

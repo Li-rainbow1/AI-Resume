@@ -102,7 +102,7 @@ def persist_turn_result(
     turn_score = _normalize_score(graph_output.get("turnScore"))
     final_evaluation = graph_output.get("finalEvaluation") if isinstance(graph_output.get("finalEvaluation"), dict) else None
     sources = list(graph_output.get("sources") or [])
-    meta = graph_output.get("meta") if isinstance(graph_output.get("meta"), dict) else {}
+    meta = dict(graph_output.get("meta")) if isinstance(graph_output.get("meta"), dict) else {}
 
     now_iso = _now_iso()
     session = repository.get(session_id, request.user_id)
@@ -118,6 +118,14 @@ def persist_turn_result(
         completed_ids.append(cached_request_id)
     if request_id and request_id in completed_ids:
         raise ValueError('该请求已完成且已有后续回合，请刷新会话查看最新记录')
+    # 逐轮整理记录累计保存到现有响应 JSON，避免下一轮覆盖掉此前的诊断依据。
+    # 幂等检查先执行；这些记录不加入回答模型的历史或摘要输入。
+    previous_meta = cached_response.get("meta", {}) if isinstance(cached_response, dict) else {}
+    query_history = list(previous_meta.get("retrievalQueryHistory") or [])
+    trace = meta.get("retrievalQuery")
+    if isinstance(trace, dict):
+        query_history.append({**trace, "requestId": request_id, "createdAt": now_iso})
+    meta["retrievalQueryHistory"] = query_history
     messages = _ensure_messages(session)
     expected_version = int(graph_output.get('contextVersion') or 0)
     if int(session.get('contextVersion') or 0) != expected_version:

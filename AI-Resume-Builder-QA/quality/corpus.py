@@ -1,15 +1,4 @@
-"""按 `schema_version` 分发「语料怎么入库」。
-
-加载器（`quality/loaders.py`）解决「题目怎么读」，这里解决它之后的另一半：数据集声明的
-素材怎么变成一轮可上传的语料。两件事分开是因为变化频率不同——加题目不影响上传编排，
-换数据集却往往要换上传方式。
-
-历史背景：`runner.py` 原先写死 `_require_supported_corpus`，只认 `evidence-v3` 的
-「一篇主文档 + 三张附件」，新数据集（5 篇正文 + 64 张附件、附件按 Markdown 相对路径挂
-到各自正文）根本进不来。现在编排与 schema 一起分发，未登记的数据集在**上传之前**报错。
-
-新增一个数据集 = `quality/loaders.py` 加一个加载器 + 这里加一个语料工厂 + 一行注册。
-"""
+"""按数据集 schema_version 准备正文及图片附件，上传前校验语料。"""
 
 import hashlib
 from collections.abc import Callable
@@ -17,7 +6,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from clients.rag import UploadAsset
-from quality.models import LEGACY_SCHEMA_VERSION, CorpusAsset, QualityCorpus
+from quality.models import CorpusAsset, QualityCorpus
 
 if TYPE_CHECKING:
     from quality.loaders import CaseSet
@@ -75,18 +64,6 @@ def corpus_for(case_set: "CaseSet", temp_root: Path, run_id: str) -> QualityCorp
 def expected_unreferenced_for(case_set: "CaseSet") -> tuple[str, ...]:
     """数据集声明「已上传但正文没引用」的附件；未登记的数据集按「不允许有」处理。"""
     return _expected_unreferenced(case_set) if case_set.schema_version == _NOTES_SCHEMA_VERSION else ()
-
-
-@register_corpus_factory(LEGACY_SCHEMA_VERSION)
-def build_legacy_corpus(case_set: "CaseSet", temp_root: Path, run_id: str) -> QualityCorpus:
-    """旧集：单主文档 + 三张附件 + 三份纯文本干扰文档。
-
-    素材不是从数据集目录读的（旧集语料已不在本机），而是由工厂现场生成，因此
-    `case_set.assets` 在这里不参与。
-    """
-    from quality.assets import QualityAssetFactory
-
-    return QualityAssetFactory(temp_root, run_id).create()
 
 
 @register_corpus_factory(_NOTES_SCHEMA_VERSION)

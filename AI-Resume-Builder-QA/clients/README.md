@@ -1,6 +1,6 @@
 # clients —— 接口客户端（技术角色包）
 
-被测系统的 HTTP / SSE 客户端封装，被 `tests/api`、`tests/quality`、`tests/ui` 与多个 `scripts/` 共用，
+被测系统的 HTTP / SSE 客户端封装，被 `tests/api`、`tests/quality` 与多个 `scripts/` 共用，
 不属于任何单一测试类型，因此按**技术角色**留在仓库根，而不是收进某个 `tests/<类型>/`。
 
 | 模块 | 职责 |

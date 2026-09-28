@@ -186,7 +186,3 @@ npm run type-check   # TypeScript 类型检查
 npm run lint         # ESLint 检查
 npm run build        # 构建前端产物
 ```
-
-## 说明
-
-本仓库只保留项目源码、配置模板和文档。本地测试数据、运行报告、内部设计稿与运行环境文件不纳入版本控制，相关路径见 `.gitignore`。

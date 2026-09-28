@@ -73,7 +73,7 @@ const serviceDescriptions: Record<SystemServiceKey, string> = {
   chat: '用于简历优化、AI 面试和其他文本对话。',
   vision: '用于图片简历和图片资料的文字提取。',
   realtime: '用于浏览器实时语音转写会话。',
-  rag: '设置 AI 面试的知识库检索，适用于“我是面试官”和“我是候选人”两种模式。',
+  rag: '配置 AI 面试检索链路。',
   smtp: '仅用于注册和密码重置验证码邮件。',
 }
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
@@ -623,8 +623,7 @@ onMounted(() => {
           <div v-else-if="key === 'rag'" class="form-grid">
             <label class="field field-full"><span>面试检索数量</span><input v-model.number="drafts.rag.config.interviewTopK" type="number" min="1" :max="RAG_DEFAULTS.interviewTopK" /></label>
             <div class="field-help field-full">两种面试模式共用此配置，每轮最多使用 {{ RAG_DEFAULTS.interviewTopK }} 段相关内容。</div>
-            <label class="field field-full"><span>相似度阈值</span><input v-model.number="drafts.rag.config.similarityThreshold" type="number" min="0" max="1" step="0.01" /></label>
-            <div class="field-help field-full">筛选与当前面试内容相关的资料，阈值越高，筛选越严格。</div>
+            <div class="readonly-note field-full">AI 面试链路：向量候选 Top15 → qwen3.7-text-rerank → 重排分数 ≥ 0.6 → 最多返回 Top4。</div>
             <div class="readonly-note field-full">只读部署参数：切块 {{ drafts.rag.config.chunkSize }} · 重叠 {{ drafts.rag.config.chunkOverlap }} · 单文件 {{ drafts.rag.config.maxFileSizeMb }} MB。它们与已有向量和 Nginx 限制绑定。</div>
           </div>
 

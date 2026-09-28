@@ -118,7 +118,7 @@ FastAPI AI 后端（api → application → domain → infrastructure 分层）
 | 对象存储  | MinIO                                          |
 | 数据库迁移 | Flyway                                         |
 | AI 能力 | OpenAI 兼容的 Chat、Embedding、Vision OCR、Realtime  |
-| 质量保障  | pytest、httpx、pytest-playwright、Locust、DeepEval |
+| 质量保障  | pytest、httpx、Locust、DeepEval |
 
 ## 快速开始
 
@@ -145,8 +145,3 @@ python -m venv .venv
 ```
 
 测试类型、pytest 标记与单类运行命令见 [QA README](AI-Resume-Builder-QA/README.md)。
-
-## 说明
-
-- 本仓库只保留源码、配置模板与公开文档；本地测试数据、运行报告、内部设计稿与环境文件不纳入版本控制，相关路径见根目录及各子目录的 `.gitignore`。
-- 本项目为个人项目，暂未附开源许可；如需引用或复用请先联系作者。

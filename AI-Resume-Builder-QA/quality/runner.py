@@ -14,14 +14,13 @@ from quality.freeze import verify_files as verify_frozen_files
 from quality.freeze import verify_judge as verify_frozen_judge
 from quality.freeze import verify_services as verify_frozen_services
 from quality.loaders import load_case_set
-from quality.matchers import matcher_for_cases
+from quality.chunk_annotations import ChunkAnnotationError
 from quality.metrics import SCORING_VERSION, evaluate_case, evidence_details
 from quality.models import CaseResult, EvalCase, QualityCorpus
 from quality.reporting import write_reports
 from quality.resident_corpus import corpus_token, find_reusable_documents, is_resident_capable
 
-# 当前在用的数据集：旧集（`golden_dataset.jsonl`）文件已不在本机，默认值不能再指向它，
-# 否则真实评测入口会在加载阶段报「数据集不存在」。
+# 当前 RAG 评测数据集。
 DEFAULT_DATASET_DIR = Path(__file__).resolve().parents[1] / "testdata" / "quality" / "interview-notes-v1"
 
 
@@ -93,7 +92,10 @@ async def run_quality_evaluation(
     case_set = load_case_set(dataset_path or DEFAULT_DATASET_DIR, split)
     cases = list(case_set.cases)
     dataset_dir = case_set.dataset_dir
-    matcher = matcher_for_cases(cases)
+    if any(c.answerable and not c.chunk_snapshot_version for c in cases):
+        raise ChunkAnnotationError("检索计分要求固定片段标注")
+    active_judge_metrics = sorted({key for case in cases for key in metric_keys_for(case)})
+    include_deepeval = include_deepeval and bool(active_judge_metrics)
     judge_config = judge_config_summary() if include_deepeval else None
     # 正式集执行前核验冻结数据、评分源码与公开服务配置，变化时拒绝上传。
     # 清单的可选性与内容的判定都收口在 `quality/freeze.py`，生成方与校验方共用一套。
@@ -114,7 +116,8 @@ async def run_quality_evaluation(
     config_summary = {
         "scoring_version": SCORING_VERSION,
         "judge": judge_config,
-        "matcher": matcher.name,
+        "active_judge_metrics": active_judge_metrics if include_deepeval else [],
+        "matcher": "fixed-chunk-id",
         "schema_version": case_set.schema_version,
         "freeze_manifest_sha256": (
             sha256_file(dataset_dir / FREEZE_MANIFEST_NAME) if manifest else None
@@ -185,7 +188,7 @@ async def run_quality_evaluation(
                     actual_answer="",
                     reference_answer=case.reference_answer,
                     sources=[],
-                    deterministic_metrics=evaluate_case(case, "", [], matcher),
+                    deterministic_metrics=dict.fromkeys(("recall_at_k", "precision_at_returned", "mrr")),
                     passed=None if not case.answerable else False,
                     evaluation_status="not_applicable" if not case.answerable else "failed",
                     failure_reasons=[] if not case.answerable else [type(exc).__name__],
@@ -202,7 +205,7 @@ async def run_quality_evaluation(
             results.append(CaseResult(
                 case_id=case.case_id, question=case.question, actual_answer="",
                 reference_answer=case.reference_answer, sources=[],
-                deterministic_metrics=evaluate_case(case, "", [], matcher),
+                deterministic_metrics=evaluate_case(case, "", []),
                 passed=None, evaluation_status="not_applicable",
                 **_case_dimensions(case),
             ))
@@ -216,19 +219,15 @@ async def run_quality_evaluation(
             # 报告只保留异常类型，避免错误文本夹带地址或鉴权信息。
             upstream_error = type(exc).__name__
             answer, sources = "", []
-        # 确定性层的证据判分也调 Judge，而这三处原先没有任何保护：一次断连就把整轮
-        # 报告带走（2026-09-17：已跑 19 分钟、写到第 9 题时被 `APIConnectionError` 打断，
-        # 因为 `APIConnectionError` 不是 `ValueError`，`SemanticMatcher` 接不住）。
-        # 重试已在 `judge_completion` 里统一做；这里只兜「重试用满仍失败」，口径与
-        # DeepEval 层（下面的 `except`）完全一致：记一条同类失败，按零命中写指标，
-        # 继续跑下一题——宁可留下一条可查的失败记录，也不要整轮作废。
+        # 标注对应失败单独报告，不转换成未召回或Judge失败。
         try:
-            metrics = evaluate_case(case, answer, sources, matcher)
+            metrics = (dict.fromkeys(("recall_at_k", "precision_at_returned", "mrr"))
+                       if upstream_error else evaluate_case(case, answer, sources))
             categories, reasons = classify_bad_case(case, answer, sources, metrics, upstream_error)
-            evidence = evidence_details(case, sources, matcher)
+            evidence = ({"status": "upstream_error"} if upstream_error else evidence_details(case, sources))
         except Exception as exc:
-            metrics = evaluate_case(case, answer, [], matcher)
-            categories, reasons = ["上游模型或网络失败"], [f"Judge 执行失败：{type(exc).__name__}"]
+            metrics = {name: None for name in ("recall_at_k", "precision_at_returned", "mrr")}
+            categories, reasons = ["片段标注对应失败"], [f"确定性计分失败：{type(exc).__name__}"]
             evidence = {}
         result = CaseResult(
             case_id=case.case_id,
@@ -257,9 +256,8 @@ async def run_quality_evaluation(
             except Exception as exc:
                 result.bad_case_categories.append("上游模型或网络失败")
                 result.failure_reasons.append(f"Judge 执行失败：{type(exc).__name__}")
-        # 无答案题已单列 N/A；有答案题要求证据完整覆盖，并至少有一个相关片段。
-        # 证据完整覆盖（recall=1）时必然至少有一个相关片段，mrr>0 因此在此处是冗余的
-        # 保护条件，保留它只为防御「有答案题零返回」这类异常。
+        # 保留全量相关片段召回门槛；相关片段数大于K时，此门槛不可达到。
+        # 该状态只表示片段全量召回，不等于答案内容完整性。
         deterministic_passed = (
             metrics["recall_at_k"] == 1
             and (metrics["mrr"] or 0) > 0

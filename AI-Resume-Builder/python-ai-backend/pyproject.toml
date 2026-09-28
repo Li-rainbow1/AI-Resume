@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "M1 minimal runnable Python AI backend for resume-builder"
 requires-python = ">=3.11"
 dependencies = [
+  "langchain-text-splitters==1.1.2",
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
   "pydantic>=2.8.0,<3.0.0",

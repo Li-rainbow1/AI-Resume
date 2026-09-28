@@ -1,6 +1,6 @@
 # AI Resume Builder QA
 
-AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock AI 契约、AI 面试流式边界、Playwright UI 场景与图片解析性能对比**，并保留可复现的报告产物。
+AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock AI 契约、AI 面试流式边界与图片解析性能对比**，并保留可复现的报告产物。
 
 被测源码为同项目的业务仓库（Vue 3 前端 + Python AI Backend）。本仓库只承载测试代码、测试数据、测试报告与 Mock AI 服务，不含业务实现。
 
@@ -11,18 +11,17 @@ AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock A
 | 接口自动化      | `tests/api/`         | pytest + httpx    | `integration`  | RAG 主链与管理端鉴权，运行 ID 隔离数据并自动清理        |
 | Mock AI 契约 | `tests/mock/`        | pytest + FastAPI  | `mock_ai`      | OpenAI-compatible Mock AI 服务本体与契约用例 |
 | AI 面试边界    | `tests/interview/`   | pytest            | —              | 上下文完整性、超阈值摘要、严格流式结束与请求幂等            |
-| UI 自动化     | `tests/ui/`          | pytest-playwright | `ui`           | Markdown 图片附件上传、解析、预览、刷新回显与删除主链     |
 | 性能对比       | `tests/performance/` | Locust            | —              | 图片解析同步串行与异步并发 3 的对照基线               |
-| 质量评测       | `tests/quality/`     | pytest + DeepEval | `quality_eval` | 检索与生成指标的评测框架与用例                     |
+| 质量评测       | `tests/quality/`     | pytest + DeepEval | `quality_eval` | 固定片段 qrels 检索指标；保留面试 Judge 适配契约 |
 
 各类型的入口、前置条件与运行命令见 [`tests/README.md`](tests/README.md)。
 
-`tests/quality/` 与 `quality/` 作为历史评测框架保留，便于追溯既有实现；其配套语料与 Golden Dataset 已移除，该链路停止投入，当前不具备运行条件。
+质量评测已有固定片段 ID 评分实现，使用本地忽略的 `testdata/quality/interview-notes-v1/` 与 `retrieval-snapshot/qrels.jsonl` 标注。离线契约测试可运行；真实 RAG 基线入口和数据准备要求见 [`quality/README.md`](quality/README.md)。当前仅支持现行数据集与固定片段 qrels 评分。
 
 ## 目录结构
 
 ```text
-tests/          按测试类型收敛的用例与框架代码，六类见上表
+tests/          按测试类型收敛的用例与框架代码，五类见上表
 clients/        鉴权、SSE 与 RAG 接口客户端
 fixtures/       配置、管理员 Token、数据工厂与运行清理
 quality/        质量评测框架：数据集加载、确定性指标、DeepEval 适配与报告
@@ -74,14 +73,7 @@ docker compose --env-file .env.test -f compose.qa.yml up -d --build
 .\.venv\Scripts\python.exe -m pytest tests\interview # AI 面试上下文与流式边界
 ```
 
-UI 场景默认不执行，需显式开启：
-
-```powershell
-$env:QA_RUN_UI = '1'
-.\.venv\Scripts\python.exe -m pytest tests\ui -m ui --browser chromium
-```
-
-一键回归按「健康检查、接口、Mock、面试、UI、清理校验」顺序执行，失败即中止且始终执行清理校验：
+一键回归按「健康检查、接口、Mock、面试、清理校验」顺序执行，失败即中止且始终执行清理校验：
 
 ```powershell
 .\scripts\run_regression.ps1
@@ -95,7 +87,3 @@ $env:QA_RUN_UI = '1'
 - 凭据只通过当前进程的环境变量传入，不写入受版本控制的文件、命令历史、日志或报告。
 - 写入类用例受显式开关控制（如 `QA_ALLOW_RAG_WRITES`），并按 `QA_RUN_ID` 精确清理本轮数据；每轮结束执行 `scripts/verify_run_cleanup.py` 校验残留。
 - 真实模型质量评测在命中 Mock AI 时安全跳过，不生成虚假基线。
-
-## 说明
-
-本仓库为个人项目的质量保障资产，暂未附开源许可；如需引用或复用请先联系作者。

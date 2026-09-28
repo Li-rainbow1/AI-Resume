@@ -34,7 +34,7 @@ def classify_bad_case(
         reasons.append("sources 未命中预期文档")
     if document_hit and metrics["recall_at_k"] is not None and metrics["recall_at_k"] < 1:
         categories.append("证据未完整命中")
-        reasons.append("预期事实证据未在 TopK 内完整命中，需复核来源或匹配规则")
+        reasons.append("标注的相关片段未在 TopK 内全部返回；相关片段数大于K时无法全量召回，此状态不代表答案信息必然缺失")
     if judge_scores and max(judge_scores.values(), default=1.0) - min(judge_scores.values(), default=1.0) > 0.2:
         categories.append("Judge评分波动")
         reasons.append("同项 Judge 评分波动超过 0.2")

@@ -96,7 +96,7 @@ def test_single_request_recipe_is_used_by_the_channel() -> None:
             "model": "judge-model",
             "temperature": 0,
             "response_format": {"type": "json_object"},
-            "extra_body": {"thinking": {"type": "enabled"}},
+            "extra_body": {"thinking": {"type": "enabled"}, "reasoning_effort": "low"},
             "messages": [
                 {"role": "system", "content": "system prompt"},
                 {"role": "user", "content": "user prompt"},
@@ -110,7 +110,9 @@ def test_json_channel_parses_through_the_same_recipe() -> None:
     assert OpenAICompatibleJudge(CONFIG).answer_json("s", "u") == {"units": []}
     # 走的是同一个出口：报文完全一致。
     assert FakeCompletion.requests[0]["response_format"] == {"type": "json_object"}
-    assert FakeCompletion.requests[0]["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert FakeCompletion.requests[0]["extra_body"] == {
+        "thinking": {"type": "enabled"}, "reasoning_effort": "low"
+    }
 
 
 def _connection_error() -> Exception:
@@ -184,12 +186,10 @@ def test_interview_chain_is_the_same_class_not_a_copy() -> None:
     assert InterviewJudge is DeepEvalJudgeLLM
 
 
-def test_interview_chain_fails_the_same_way_as_the_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """共用一份配方，失败口径也要一致：判分器没给分必须带出 `metric.error`。
-
-    这条曾经是分叉的：DeepEval 质量链路抛 `RuntimeError` 并附原因，面试链路只抛
-    一个不带原因的 `ValueError`，同一类故障在两处留下不同线索。
-    """
+def test_interview_chain_records_missing_metric_score_as_structured_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """面试评分没有拿到分数时，给该指标记 error 状态并让这一轮继续产出结果。"""
     import deepeval.metrics as deepeval_metrics
 
     from quality.interview_runner import evaluate_reply
@@ -212,8 +212,10 @@ def test_interview_chain_fails_the_same_way_as_the_adapter(monkeypatch: pytest.M
             return False
 
     monkeypatch.setattr(deepeval_metrics, "FaithfulnessMetric", BrokenMetric)
-    with pytest.raises(RuntimeError, match="未返回分数：judge exploded"):
-        evaluate_reply("问题", "回答", ["片段"])
+    result = evaluate_reply("问题", "回答", ["片段"])
+    assert result["faithfulness"]["status"] == "error"
+    assert result["faithfulness"]["score"] is None
+    assert result["faithfulness"]["reason"] == "未返回分数"
 
 
 def test_config_reports_which_prefix_won(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -236,7 +238,9 @@ def test_summary_records_the_recipe_actually_used() -> None:
     summary = CONFIG.summary()
     assert summary["temperature"] == 0
     assert summary["response_format"] == "json_object"
-    assert summary["thinking"] == {"thinking": {"type": "enabled"}}
+    assert summary["thinking"] == {
+        "thinking": {"type": "enabled"}, "reasoning_effort": "low"
+    }
     assert summary["sdk_max_retries"] == 0
     assert summary["request_timeout_seconds"] == 42.0
     assert summary["max_attempts"] == 2
@@ -277,3 +281,32 @@ def test_channel_cache_returns_one_shared_instance(monkeypatch: pytest.MonkeyPat
         assert json.loads(json.dumps(judge_channel_from_environment().summary()))["model"]
     finally:
         judge_channel_from_environment.cache_clear()
+
+
+def test_judge_config_reports_missing_variable_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUALITY_JUDGE_MODEL", "some-model")
+    monkeypatch.delenv("QUALITY_JUDGE_BASE_URL", raising=False)
+    monkeypatch.delenv("QUALITY_JUDGE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="QUALITY_JUDGE_BASE_URL"):
+        judge_config_from_environment(prefixes=("QUALITY_JUDGE",))
+
+
+def test_judge_config_prefers_dedicated_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUALITY_JUDGE_MODEL", "cheap-model")
+    monkeypatch.setenv("QUALITY_JUDGE_BASE_URL", "https://judge.invalid/v1")
+    monkeypatch.setenv("QUALITY_JUDGE_API_KEY", "secret-key")
+    monkeypatch.setenv("DEEPEVAL_JUDGE_MODEL", "expensive-model")
+    monkeypatch.setenv("DEEPEVAL_JUDGE_BASE_URL", "https://deepeval.invalid/v1")
+    monkeypatch.setenv("DEEPEVAL_JUDGE_API_KEY", "secret-key-2")
+    config = judge_config_from_environment()
+    assert config.model == "cheap-model"
+    # 报告里的摘要不能带凭证，也不能带查询参数。
+    summary = config.summary()
+    assert "secret-key" not in json.dumps(summary)
+    assert summary["base_url"] == "https://judge.invalid/v1"
+
+
+def test_openai_judge_summary_matches_judge_config() -> None:
+    config = JudgeConfig(model="m", base_url="https://host.invalid/v1", api_key="k")
+    judge = OpenAICompatibleJudge(config)
+    assert judge.summary()["model"] == "m"

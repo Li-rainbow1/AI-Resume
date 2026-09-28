@@ -16,10 +16,9 @@ async def _run(
     rag_client: RagClient,
     qa_settings: QaSettings,
     tmp_path: Path,
-    include_deepeval: bool,
 ):
     quality_settings = QualitySettings.load()
-    reason = quality_settings.skip_reason(qa_settings, require_judge=include_deepeval)
+    reason = quality_settings.skip_reason(qa_settings)
     if reason:
         pytest.skip(reason)
     guard_reason = await real_model_guard_reason(rag_client)
@@ -31,7 +30,7 @@ async def _run(
         tmp_path / "quality-assets",
         qa_settings.image_poll_timeout_seconds,
         qa_settings.image_poll_interval_seconds,
-        include_deepeval,
+        False,
         "localhost"
         if urlparse(qa_settings.base_url).hostname in {"localhost", "127.0.0.1"}
         else "remote-explicit",
@@ -65,16 +64,4 @@ async def test_real_rag_deterministic_baseline(
     qa_settings: QaSettings,
     tmp_path: Path,
 ) -> None:
-    await _run(rag_client, qa_settings, tmp_path, include_deepeval=False)
-
-
-@pytest.mark.quality_eval
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_real_rag_deepeval_baseline(
-    rag_client: RagClient,
-    qa_settings: QaSettings,
-    tmp_path: Path,
-) -> None:
-    pytest.importorskip("deepeval", reason="缺少 DeepEval 可选依赖，请安装 .[eval,test]")
-    await _run(rag_client, qa_settings, tmp_path, include_deepeval=True)
+    await _run(rag_client, qa_settings, tmp_path)

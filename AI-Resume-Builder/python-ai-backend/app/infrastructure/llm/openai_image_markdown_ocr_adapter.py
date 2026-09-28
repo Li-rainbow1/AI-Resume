@@ -171,6 +171,8 @@ class OpenAIImageMarkdownOcrAdapter:
             "先判断图片的主要内容，再提取文字或说明图示。"
             "classification 只能是 text、table、diagram、decorative、empty 之一。"
             "text 和 table 填写清晰可见的原文到 ocrText；diagram 用 description 描述节点、关系、流程或结构；"
+            "图示只描述可见节点、标签和箭头方向，不添加图中未表达的因果结论或技术推断；"
+            "图标题仅作为标题记录，不能据此推断每条分支的结果。"
             "decorative 和 empty 的 ocrText、description 返回空字符串。不要猜测不可见内容。"
             'JSON 格式必须为：{"classification":"text","ocrText":"","description":"","confidence":0.0}'
         )

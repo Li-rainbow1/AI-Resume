@@ -27,6 +27,7 @@ from app.infrastructure.config.settings import Settings, get_settings
 from app.infrastructure.config.runtime_settings_provider import RuntimeSettingsProvider
 from app.infrastructure.factories.llm_factory import create_chat_client, create_realtime_client
 from app.infrastructure.llm.openai_embedding_adapter import OpenAIEmbeddingAdapter
+from app.infrastructure.llm.qwen_rerank_client import QwenRerankClient
 from app.infrastructure.llm.ollama_embedding_adapter import OllamaEmbeddingAdapter
 from app.infrastructure.llm.openai_image_markdown_ocr_adapter import OpenAIImageMarkdownOcrAdapter
 from app.infrastructure.mail.dynamic_auth_mail_adapter import DynamicAuthMailAdapter
@@ -283,6 +284,18 @@ def build_rag_retriever(settings: Settings | None = None) -> RagRetrieverService
     return RagRetrieverService(vector_store=build_vector_store(settings), project_repository=build_rag_document_repository(settings))
 
 
+def build_reranker(settings: Settings | None = None) -> QwenRerankClient:
+    resolved = settings or resolve_settings()
+    # 可用 RERANK_API_KEY 单独配置；未配置时复用当前 Embedding 凭据，
+    # 便于已有百炼 Embedding 配置直接启用重排。
+    return QwenRerankClient(
+        api_key=resolved.rag_rerank_api_key or resolved.openai_embedding_api_key,
+        model_name=resolved.rag_rerank_model,
+        endpoint=resolved.rag_rerank_endpoint,
+        timeout_seconds=resolved.rag_rerank_timeout_seconds,
+    )
+
+
 def build_agent_runtime(settings: Settings | None = None) -> AgentRuntimePort:
     resolved = settings or resolve_settings()
     return AutoGenAgentRuntimeAdapter(enabled=resolved.autogen_enabled)
@@ -340,6 +353,8 @@ def build_interview_graph(settings: Settings | None = None) -> InterviewGraph:
     _LOGGER.warning("[AI面试][构建] chat_client ready")
     rag_retriever = build_rag_retriever(resolved)
     _LOGGER.warning("[AI面试][构建] rag_retriever ready")
+    reranker = build_reranker(resolved)
+    _LOGGER.warning("[AI面试][构建] reranker ready")
     agent_runtime = build_agent_runtime(resolved)
     _LOGGER.warning("[AI面试][构建] agent_runtime ready")
 
@@ -347,9 +362,10 @@ def build_interview_graph(settings: Settings | None = None) -> InterviewGraph:
         llm_client=chat_client,
         rag_retriever=rag_retriever,
         autogen_runtime=agent_runtime,
+        reranker=reranker,
         rag_top_k=resolved.app_interview_rag_top_k,
-        rag_similarity_threshold=resolved.app_interview_rag_similarity_threshold,
         rag_timeout_seconds=resolved.app_interview_rag_timeout_seconds,
+        capture_context=resolved.app_interview_capture_context,
         context_budget=InterviewContextBudget(
             resolved.app_interview_context_soft_chars,
             resolved.app_interview_context_hard_chars,
