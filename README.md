@@ -16,7 +16,7 @@
 | 目录                                               | 内容                                      | 文档                                          |
 | ------------------------------------------------ | --------------------------------------- | ------------------------------------------- |
 | [`AI-Resume-Builder/`](AI-Resume-Builder/)       | 业务实现：Vue 3 前端、Python AI 后端、数据库迁移        | [业务 README](AI-Resume-Builder/README.md)    |
-| [`AI-Resume-Builder-QA/`](AI-Resume-Builder-QA/) | 质量保障：接口自动化、Mock AI 契约、面试流式边界、UI 场景、性能对比 | [QA README](AI-Resume-Builder-QA/README.md) |
+| [`AI-Resume-Builder-QA/`](AI-Resume-Builder-QA/) | 质量保障：接口自动化、Mock AI 契约、面试流式边界、RAG 与 AI 面试质量评测、性能对比 | [QA README](AI-Resume-Builder-QA/README.md) |
 
 两者原为各自独立的仓库，合并进本仓库时各自的提交历史完整保留，各带一层子目录。
 
@@ -50,6 +50,19 @@
 表中 `upload_request_ms` 两版语义不同（同步版含图片处理，异步版只到上传流结束），不可横向比较；正式口径为 `total_to_image_parsed_ms`，P95 在 10 个样本下即该组最大值。本轮为单轮、单机、单语料对照，不构成容量推断。
 
 原始报告与逐样本明细：[`formal-ab-20260912a/VERIFICATION.md`](AI-Resume-Builder-QA/reports/performance/image-parser/formal-ab-20260912a/VERIFICATION.md)（含 `comparison.csv`、两组 `summary.json`、`samples.jsonl`、Locust 统计与队列采样）。
+
+## RAG 检索与 AI 面试质量评测
+
+质量评测分别检查检索结果能否找到相关资料，以及面试回答是否有依据、是否切题，用于分析切块、检索与回答生成中的问题。
+
+| 评测对象 | 方法 | 指标与输出 |
+| --- | --- | --- |
+| RAG 检索 | 固定文档片段快照，为每道题标注相关片段 ID；将查询返回的片段映射到快照，与相关性标注（qrels）比较 | Recall@K、实际返回 Precision、MRR；输出逐题 JSONL、CSV 明细与 JSON 汇总 |
+| AI 面试回答 | 采集实际传入回答模型的上下文和生成回答，通过 DeepEval 与 Judge 模型评判，并单独审查拒答、澄清等情况 | Faithfulness（回答是否有上下文依据）、Answer Relevancy（回答是否切题）、逐题判分理由与异常记录 |
+
+RAG 检索采用 `chunk-qrels-v1` 固定片段评分，指标计算不调用 Judge。面试评测支持复用已保存的回答与上下文重跑 Judge，并合并分批评分结果，便于核查评分变化。
+
+Mock AI 用于接口回归；真实质量评测需要配置真实模型，并准备本地数据集和相关性标注。数据集与原始报告保留在本地，克隆代码后需另行准备。评测流程、指标定义和运行要求见 [RAG 质量评测说明](AI-Resume-Builder-QA/quality/README.md)，面试评测实现见 [面试评测执行器](AI-Resume-Builder-QA/quality/interview_runner.py)。
 
 ## 系统结构
 

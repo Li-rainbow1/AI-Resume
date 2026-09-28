@@ -1,6 +1,6 @@
 # AI Resume Builder QA
 
-AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock AI 契约、AI 面试流式边界与图片解析性能对比**，并保留可复现的报告产物。
+AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock AI 契约、AI 面试流式边界、RAG 检索与 AI 面试质量评测、图片解析性能对比**。
 
 被测源码为同项目的业务仓库（Vue 3 前端 + Python AI Backend）。本仓库只承载测试代码、测试数据、测试报告与 Mock AI 服务，不含业务实现。
 
@@ -12,7 +12,7 @@ AI Resume Builder 的独立质量保障仓库，覆盖**接口自动化、Mock A
 | Mock AI 契约 | `tests/mock/`        | pytest + FastAPI  | `mock_ai`      | OpenAI-compatible Mock AI 服务本体与契约用例 |
 | AI 面试边界    | `tests/interview/`   | pytest            | —              | 上下文完整性、超阈值摘要、严格流式结束与请求幂等            |
 | 性能对比       | `tests/performance/` | Locust            | —              | 图片解析同步串行与异步并发 3 的对照基线               |
-| 质量评测       | `tests/quality/`     | pytest + DeepEval | `quality_eval` | 固定片段 qrels 检索指标；保留面试 Judge 适配契约 |
+| 质量评测       | `tests/quality/`     | pytest + DeepEval | `quality_eval` | RAG 固定片段 qrels 评分；AI 面试回答的依据与相关性评测 |
 
 各类型的入口、前置条件与运行命令见 [`tests/README.md`](tests/README.md)。
 
